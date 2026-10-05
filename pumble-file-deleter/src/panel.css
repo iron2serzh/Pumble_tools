@@ -1,0 +1,48 @@
+#pumble-tools-file-deleter {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483646;
+  width: 280px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #1f2430;
+  color: #f4f6fb;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+
+#pumble-tools-file-deleter button {
+  margin: 8px 8px 0 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+#pumble-tools-file-deleter .pumble-tools-delete,
+#pumble-tools-file-deleter .pumble-tools-yes {
+  background: #e5484d;
+  color: #fff;
+}
+
+#pumble-tools-file-deleter .pumble-tools-stop,
+#pumble-tools-file-deleter .pumble-tools-no {
+  background: #3a4154;
+  color: #fff;
+}
+
+#pumble-tools-file-deleter button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#pumble-tools-file-deleter .pumble-tools-count,
+#pumble-tools-file-deleter .pumble-tools-status,
+#pumble-tools-file-deleter .pumble-tools-confirm-text {
+  margin: 0;
+}
+
+#pumble-tools-file-deleter .pumble-tools-confirm {
+  margin-top: 8px;
+}

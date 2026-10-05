@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Pumble — usuń pliki",
+  "version": "0.2.0",
+  "description": "Na widoku Files zaznacza stronę (do 40 plików) i klika kosz. Potwierdzenie, postęp i Stop.",
+  "content_scripts": [
+    {
+      "matches": ["https://app.pumble.com/*"],
+      "js": [
+        "src/list-files.js",
+        "src/wait-for.js",
+        "src/delete-session.js",
+        "src/panel.js",
+        "src/content.js"
+      ],
+      "css": ["src/panel.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
