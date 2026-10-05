@@ -1,0 +1,11 @@
+{
+  "name": "pumble-file-deleter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=8000 test/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
