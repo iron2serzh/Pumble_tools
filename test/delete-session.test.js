@@ -181,18 +181,48 @@ test('deleteListedFiles clears seven pages by re-reading the max from page 1', a
   assert.ok(waited(result) >= 19000);
 });
 
-test('deleteListedFiles stops when a cycle does not reduce the header total', async () => {
+test('deleteListedFiles still deletes every page when the pager does not mark the current one', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 3], freezeCount: true });
+  mountFilesPage(document, 40, { pages: [40, 40, 40, 41], markCurrent: false });
 
   const result = await run(document, api);
 
-  assert.equal(result.done, 3);
+  assert.equal(api.readCurrentPage(document), 1);
+  assert.equal(result.done, 161);
+  assert.equal(result.outcome, 'done');
   assert.equal(result.stopped, false);
-  assert.equal(document.body.dataset.selectAllClicks, '1');
+  assert.equal(document.body.dataset.selectAllClicks, '4');
   assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(api.readFileTotal(document), 0);
+});
+
+test('deleteListedFiles keeps deleting when the header total is slow to change', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [40, 40, 41], freezeHeader: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 121);
+  assert.equal(result.outcome, 'header');
+  assert.equal(document.body.dataset.selectAllClicks, '3');
+  assert.equal(api.readFileTotal(document), 121);
+  assert.equal(document.querySelectorAll('.file-row').length, 0);
+});
+
+test('deleteListedFiles stops only after a confirm click leaves the files in place', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { pages: [2, 3], keepRows: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 0);
+  assert.equal(result.outcome, 'unchanged');
+  assert.equal(result.stopped, false);
+  assert.equal(document.body.dataset.selectAllClicks, '1');
+  assert.equal(document.body.dataset.trashClicks, '1');
   assert.equal(api.readFileTotal(document), 5);
+  assert.equal(document.querySelectorAll('.file-row').length, 3);
 });
 
 test('deleteListedFiles reports progress from the max page back toward page 1', async () => {

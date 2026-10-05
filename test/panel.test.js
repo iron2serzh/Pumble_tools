@@ -91,6 +91,20 @@ test('the panel shows a moving wait while a pause is in progress', async () => {
   assert.match(panel.querySelector('.pumble-tools-status').textContent, /Usunięto 2 z 2/);
 });
 
+test('a confirm that leaves the files up does not say the run is finished', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { pages: [121, 40], keepRows: true });
+  const panel = api.syncPanel(document);
+  panel.querySelector('.pumble-tools-delete').click();
+  panel.querySelector('.pumble-tools-yes').click();
+  await panel.pumbleDeletion;
+  const status = panel.querySelector('.pumble-tools-status').textContent;
+  assert.match(status, /Po potwierdzeniu nic nie ubyło/);
+  assert.match(status, /Usunięto 0 z 161/);
+  assert.equal(status.startsWith('Gotowe'), false);
+  assert.equal(document.querySelectorAll('.file-row').length, 40);
+});
+
 test('Stop aborts deletion before the next page', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 5] });

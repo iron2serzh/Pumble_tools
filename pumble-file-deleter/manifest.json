@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Pumble — usuń pliki",
-  "version": "0.5.0",
-  "description": "Na widoku Files kasuje ostatnią stronę, wraca na stronę 1 i czyta paginację od nowa. Potwierdzenie, postęp i Stop.",
+  "version": "0.6.0",
+  "description": "Na widoku Files kasuje ostatnią stronę i wraca na stronę 1. Nie kończy, dopóki nagłówek nie spadnie do zera.",
   "content_scripts": [
     {
       "matches": ["https://app.pumble.com/*"],

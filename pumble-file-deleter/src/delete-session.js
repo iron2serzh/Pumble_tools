@@ -77,13 +77,14 @@
     }
   }
 
-  async function deleteCurrentPage(doc, rows, options) {
+  async function deleteCurrentPage(doc, options) {
+    const rows = [...api.listFileRows(doc)];
     const selectAll = doc.querySelector(SELECT_ALL);
-    if (!selectAll) throw new Error('brak zaznacz wszystko');
+    if (!selectAll) return { ok: false, rows };
     selectAll.click();
 
     const trash = await poll(options, () => doc.querySelector(DELETE_BUTTON));
-    if (!trash) throw new Error('brak kosza');
+    if (!trash) return { ok: false, rows };
     trash.click();
 
     const confirm = await poll(
@@ -94,9 +95,7 @@
       confirm.setAttribute('data-pumble-tools-used', '1');
       confirm.click();
     }
-
-    const cleared = await poll(options, () => rows.every((row) => !row.isConnected));
-    if (!cleared) throw new Error('strona nie zniknęła');
+    return { ok: true, rows };
   }
 
   async function switchToPage(doc, number, options) {
@@ -105,20 +104,24 @@
     if (!node || node === parts.next || node === parts.previous) return false;
     clickable(node).click();
     await pause(options, PAUSE_MS);
-    return api.readCurrentPage(doc) === number && api.listFileRows(doc).length > 0;
+    return true;
   }
 
   api.deleteListedFiles = async function deleteListedFiles(doc, options = {}) {
     let done = 0;
     let failed = 0;
     let stopped = false;
+    let outcome = 'done';
     const seen = new Set();
     const initialTotal = api.readFileTotal(doc);
 
     try {
       while (!stopped) {
         throwIfAborted(options);
-        if (api.readFileTotal(doc) === 0) break;
+        if (api.readFileTotal(doc) === 0) {
+          outcome = 'done';
+          break;
+        }
 
         const parts = paginationParts(doc);
         const numbers = (parts?.numbers || []).map(pageNumber).filter((value) => value != null);
@@ -126,62 +129,106 @@
         const single = numbers.length <= 1;
 
         if (!single) {
-          if (api.readCurrentPage(doc) !== max) {
-            const opened = await switchToPage(doc, max, options);
-            if (!opened) break;
+          const opened = await switchToPage(doc, max, options);
+          if (!opened) {
+            outcome = 'blocked';
+            break;
           }
         }
 
         throwIfAborted(options);
-        const rows = [...api.listFileRows(doc)];
-        if (rows.length === 0) break;
+        let rows = [...api.listFileRows(doc)];
+        if (rows.length === 0) {
+          const appeared = await poll(options, () => api.listFileRows(doc).length > 0);
+          if (appeared) rows = [...api.listFileRows(doc)];
+        }
+        if (rows.length === 0) {
+          outcome = done > 0 ? 'header' : 'blocked';
+          break;
+        }
+
         const signature = signatureOf(rows);
-        if (seen.has(signature)) break;
+        if (seen.has(signature)) {
+          outcome = 'unchanged';
+          break;
+        }
         seen.add(signature);
         const page = api.readCurrentPage(doc);
-        const before = api.readFileTotal(doc);
 
+        let deletion;
         try {
-          await deleteCurrentPage(doc, rows, options);
-          done += rows.length;
+          deletion = await deleteCurrentPage(doc, options);
         } catch (error) {
           if (options.signal?.aborted || error?.name === 'AbortError') {
             stopped = true;
             break;
           }
           failed += rows.length;
+          outcome = 'blocked';
+          break;
+        }
+        if (!deletion.ok) {
+          outcome = 'blocked';
           break;
         }
 
-        if (typeof options.onProgress === 'function') {
-          options.onProgress({
-            done,
-            failed,
-            total: initialTotal ?? done,
-            stopped: false,
-            page,
-          });
+        let gone = deletion.rows.filter((row) => !row.isConnected);
+        if (gone.length > 0) {
+          done += gone.length;
+          if (typeof options.onProgress === 'function') {
+            options.onProgress({
+              done,
+              failed,
+              total: initialTotal ?? done,
+              stopped: false,
+              page,
+            });
+          }
         }
         throwIfAborted(options);
         await pause(options, PAUSE_MS);
         throwIfAborted(options);
-
-        const mid = api.readFileTotal(doc);
-        const cleared = api.listFileRows(doc).length === 0;
-        if (mid === 0) break;
-        if (single && (cleared || (before != null && mid != null && mid >= before))) break;
+        if (gone.length === 0) {
+          gone = deletion.rows.filter((row) => !row.isConnected);
+          if (gone.length === 0) {
+            outcome = 'unchanged';
+            break;
+          }
+          done += gone.length;
+          if (typeof options.onProgress === 'function') {
+            options.onProgress({
+              done,
+              failed,
+              total: initialTotal ?? done,
+              stopped: false,
+              page,
+            });
+          }
+        }
+        if (api.readFileTotal(doc) === 0) {
+          outcome = 'done';
+          break;
+        }
+        if (single) {
+          outcome = 'header';
+          break;
+        }
 
         const back = await switchToPage(doc, 1, options);
-        if (!back) break;
-        const after = api.readFileTotal(doc);
-        if (after === 0) break;
-        if (before != null && after != null && after >= before) break;
+        if (!back) {
+          outcome = 'blocked';
+          break;
+        }
       }
     } catch (error) {
       if (options.signal?.aborted || error?.name === 'AbortError') stopped = true;
       else throw error;
     }
 
-    return { done, failed, total: initialTotal ?? done, stopped };
+    if (!stopped && outcome === 'done' && api.readFileTotal(doc) > 0) {
+      outcome = done === 0 ? 'blocked' : 'header';
+    }
+
+    return { done, failed, total: initialTotal ?? done, stopped, outcome };
   };
 })(globalThis);

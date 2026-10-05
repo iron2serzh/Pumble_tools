@@ -83,9 +83,12 @@
         panel.dataset.running = '0';
         stop.hidden = true;
         const errors = result.failed ? `, błędy: ${result.failed}` : '';
-        status.textContent = result.stopped
-          ? `Zatrzymano. Usunięto ${result.done} z ${result.total}${errors}.`
-          : `Gotowe. Usunięto ${result.done} z ${result.total}${errors}.`;
+        const liveTotal = root.PumbleFileDeleter.readFileTotal(doc);
+        const summary = `Usunięto ${result.done} z ${result.total}${errors}`;
+        if (result.stopped) status.textContent = `Zatrzymano. ${summary}.`;
+        else if (result.outcome === 'unchanged') status.textContent = `Po potwierdzeniu nic nie ubyło. ${summary}.`;
+        else if (liveTotal > 0) status.textContent = `Niegotowe. ${summary}. Nagłówek nadal pokazuje ${liveTotal}.`;
+        else status.textContent = `Gotowe. ${summary}.`;
         renderCount(panel, doc);
         return result;
       });

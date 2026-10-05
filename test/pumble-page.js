@@ -97,7 +97,7 @@ export function mountFilesPage(document, count, options = {}) {
   }
 
   function updateHeader() {
-    if (options.freezeCount) return;
+    if (options.freezeCount || options.freezeHeader) return;
     const sum = counts.reduce((total, value) => total + value, 0);
     titleText.textContent = ` Files (${sum})`;
   }
@@ -107,7 +107,7 @@ export function mountFilesPage(document, count, options = {}) {
     labels.forEach((number) => {
       const item = document.createElement('li');
       item.textContent = String(number);
-      if (number === current) item.setAttribute('aria-current', 'page');
+      if (options.markCurrent !== false && number === current) item.setAttribute('aria-current', 'page');
       item.addEventListener('click', () => {
         note(`page:${number}`);
         bump(document, 'pageNumberClicks');
@@ -170,7 +170,7 @@ export function mountFilesPage(document, count, options = {}) {
     renderLabels(staleLabels, staleCurrent);
   }
 
-  if (options.freezeCount) {
+  if (options.freezeCount || options.freezeHeader) {
     const sum = (options.pages || [count]).reduce((total, value) => total + value, 0);
     titleText.textContent = ` Files (${sum})`;
   }
@@ -198,12 +198,13 @@ function showDeleteButton(document, actions, options, onCleared) {
     const current = document.body.dataset.actionLog;
     document.body.dataset.actionLog = current ? `${current},delete` : 'delete';
     const rows = [...document.querySelectorAll('.file-browser__list > .file-list-view')];
+    if (options.keepRows) return;
     if (options.confirm === false) {
       rows.forEach((row) => row.remove());
       onCleared();
       return;
     }
-    openConfirm(document, rows, onCleared);
+    openConfirm(document, rows, onCleared, options);
   });
   wrap.appendChild(button);
   actions.appendChild(wrap);
@@ -219,7 +220,7 @@ function createRow(document, id) {
   return row;
 }
 
-function openConfirm(document, rows, onCleared) {
+function openConfirm(document, rows, onCleared, options = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'modal-dialog__transition-wrapper';
   const footer = document.createElement('div');
@@ -232,8 +233,9 @@ function openConfirm(document, rows, onCleared) {
   confirm.type = 'button';
   confirm.className = 'MuiButton-containedPrimary css-dr4g1b confirmation-modal__confirm-btn';
   confirm.addEventListener('click', () => {
-    rows.forEach((row) => row.remove());
     wrap.remove();
+    if (options.keepRows) return;
+    rows.forEach((row) => row.remove());
     onCleared();
   });
   footer.append(decoy, confirm);
