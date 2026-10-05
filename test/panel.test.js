@@ -68,6 +68,29 @@ test('confirming deletion removes the listed files and shows progress', async ()
   assert.match(panel.querySelector('.pumble-tools-status').textContent, /Usunięto 2 z 2/);
 });
 
+test('the panel shows a moving wait while a pause is in progress', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2);
+  const original = api.deleteListedFiles;
+  let sawWait = false;
+  api.deleteListedFiles = (doc, options) => original(doc, {
+    ...options,
+    sleep: async () => {
+      const bar = document.querySelector('.pumble-tools-wait');
+      if (bar && bar.hidden === false && document.querySelector('.pumble-tools-status').textContent === 'Czekam…') {
+        sawWait = true;
+      }
+    },
+  });
+  const panel = api.syncPanel(document);
+  panel.querySelector('.pumble-tools-delete').click();
+  panel.querySelector('.pumble-tools-yes').click();
+  await panel.pumbleDeletion;
+  assert.equal(sawWait, true);
+  assert.equal(panel.querySelector('.pumble-tools-wait').hidden, true);
+  assert.match(panel.querySelector('.pumble-tools-status').textContent, /Usunięto 2 z 2/);
+});
+
 test('Stop aborts deletion before the next page', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 5] });

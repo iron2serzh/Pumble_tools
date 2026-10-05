@@ -34,6 +34,7 @@
         <button type="button" class="pumble-tools-yes">Usuń</button>
         <button type="button" class="pumble-tools-no">Anuluj</button>
       </div>
+      <div class="pumble-tools-wait" hidden><span class="pumble-tools-wait-bar"></span></div>
       <p class="pumble-tools-status"></p>
     `;
     panel.querySelector('.pumble-tools-delete').addEventListener('click', () => {
@@ -42,7 +43,7 @@
       const confirm = panel.querySelector('.pumble-tools-confirm');
       confirm.hidden = false;
       panel.querySelector('.pumble-tools-confirm-text').textContent =
-        `Usunąć ${root.PumbleFileDeleter.fileCountLabel(count)}? Zaznaczę wszystko i użyję kosza. Zaczynam od ostatniej strony i cofam się do pierwszej.`;
+        `Usunąć ${root.PumbleFileDeleter.fileCountLabel(count)}? Zaznaczę wszystko i użyję kosza. Zaczynam od ostatniej strony, po każdym kasowaniu wracam na stronę 1.`;
     });
     panel.querySelector('.pumble-tools-no').addEventListener('click', () => {
       panel.querySelector('.pumble-tools-confirm').hidden = true;
@@ -58,11 +59,25 @@
       controller = new AbortController();
       panel.dataset.running = '1';
       stop.hidden = false;
+      const wait = panel.querySelector('.pumble-tools-wait');
       panel.pumbleDeletion = root.PumbleFileDeleter.deleteListedFiles(doc, {
         signal: controller.signal,
+        onPhase(phase) {
+          if (phase === 'wait') {
+            wait.hidden = false;
+            panel.classList.add('pumble-tools-waiting');
+            if (status.textContent !== 'Czekam…') status.dataset.held = status.textContent;
+            status.textContent = 'Czekam…';
+          } else {
+            wait.hidden = true;
+            panel.classList.remove('pumble-tools-waiting');
+            if (status.textContent === 'Czekam…') status.textContent = status.dataset.held || '';
+          }
+        },
         onProgress(snapshot) {
           const errors = snapshot.failed ? `, błędy: ${snapshot.failed}` : '';
           status.textContent = `Usunięto ${snapshot.done} z ${snapshot.total}${errors}`;
+          status.dataset.held = status.textContent;
         },
       }).then((result) => {
         panel.dataset.running = '0';

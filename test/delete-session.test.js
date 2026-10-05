@@ -7,11 +7,28 @@ const scripts = ['src/list-files.js', 'src/wait-for.js', 'src/delete-session.js'
 
 function run(document, api, extra = {}) {
   const time = clock();
-  return api.deleteListedFiles(document, { ...time, timeoutMs: 200, ...extra });
+  const sleeps = [];
+  const phases = [];
+  return api.deleteListedFiles(document, {
+    ...time,
+    timeoutMs: 200,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      await time.sleep(ms);
+    },
+    onPhase(phase) {
+      phases.push(phase);
+    },
+    ...extra,
+  }).then((result) => ({ ...result, sleeps, phases }));
 }
 
 function logOf(document) {
   return document.body.dataset.actionLog.split(',').filter(Boolean);
+}
+
+function waited(result) {
+  return result.sleeps.reduce((sum, ms) => sum + ms, 0);
 }
 
 test('deleteListedFiles selects the whole page once and clicks the selection trash', async () => {
@@ -27,9 +44,11 @@ test('deleteListedFiles selects the whole page once and clicks the selection tra
   assert.equal(document.body.dataset.trashClicks, '1');
   assert.equal(document.body.dataset.downloadClicks, '0');
   assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.ariaNextClicks, '0');
   assert.equal(document.body.dataset.decoyConfirmClicks, '0');
-  assert.equal(api.readFileTotal(document), 40);
+  assert.equal(api.readFileTotal(document), 0);
+  assert.ok(waited(result) >= 1000);
   assert.equal(document.querySelectorAll('.file-browser__list > .file-row').length, 0);
 });
 
@@ -43,6 +62,7 @@ test('deleteListedFiles still clears the page when Pumble shows no confirm dialo
   assert.equal(result.failed, 0);
   assert.equal(document.body.dataset.trashClicks, '1');
   assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.querySelectorAll('.file-row').length, 0);
 });
 
@@ -58,7 +78,7 @@ test('deleteListedFiles confirms with confirmation-modal__confirm-btn', async ()
   assert.equal(document.querySelectorAll('.file-row').length, 0);
 });
 
-test('deleteListedFiles stops before the earlier page when aborted', async () => {
+test('deleteListedFiles stops before the next delete when aborted', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 5] });
   const controller = new AbortController();
@@ -73,11 +93,50 @@ test('deleteListedFiles stops before the earlier page when aborted', async () =>
   assert.equal(result.done, 5);
   assert.equal(result.stopped, true);
   assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '1');
   assert.deepEqual(logOf(document), ['page:2', 'delete']);
 });
 
-test('deleteListedFiles starts on the last page number and deletes backward', async () => {
+test('deleteListedFiles aborts during a page-switch pause before any delete', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { pages: [2, 5] });
+  const controller = new AbortController();
+
+  const result = await run(document, api, {
+    signal: controller.signal,
+    sleep: async () => {
+      controller.abort();
+    },
+  });
+
+  assert.equal(result.done, 0);
+  assert.equal(result.stopped, true);
+  assert.equal(document.body.dataset.selectAllClicks, '0');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
+  assert.equal(logOf(document)[0], 'page:2');
+});
+
+test('deleteListedFiles aborts during the post-delete wait before the next delete', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { pages: [2, 5] });
+  const controller = new AbortController();
+
+  const result = await run(document, api, {
+    signal: controller.signal,
+    sleep: async () => {
+      if (document.body.dataset.trashClicks === '1') controller.abort();
+    },
+  });
+
+  assert.equal(result.done, 5);
+  assert.equal(result.stopped, true);
+  assert.equal(document.body.dataset.selectAllClicks, '1');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
+  assert.deepEqual(logOf(document), ['page:2', 'delete']);
+});
+
+test('deleteListedFiles returns to page 1 after each delete and then opens the new max', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 3, 1] });
 
@@ -86,18 +145,18 @@ test('deleteListedFiles starts on the last page number and deletes backward', as
 
   assert.equal(result.done, 6);
   assert.equal(result.failed, 0);
-  assert.equal(log[0], 'page:3');
-  assert.deepEqual(log.filter((entry) => entry === 'delete'), ['delete', 'delete', 'delete']);
-  assert.equal(log.includes('next'), false);
+  assert.deepEqual(log, ['page:3', 'delete', 'page:1', 'page:2', 'delete', 'page:1', 'delete']);
   assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.ariaNextClicks, '0');
   assert.equal(document.body.dataset.downloadClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '3');
-  assert.equal(document.body.dataset.trashClicks, '3');
-  assert.equal(document.querySelectorAll('.file-row').length, 0);
+  assert.equal(api.readFileTotal(document), 0);
+  assert.ok(waited(result) >= 7000);
+  assert.ok(result.phases.filter((phase) => phase === 'wait').length >= 7);
 });
 
-test('deleteListedFiles clears seven pages from the last page number back to page 1', async () => {
+test('deleteListedFiles clears seven pages by re-reading the max from page 1', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   const pages = [40, 40, 40, 40, 40, 40, 10];
   mountFilesPage(document, 40, { pages });
@@ -107,44 +166,36 @@ test('deleteListedFiles clears seven pages from the last page number back to pag
   assert.equal(pager.childNodes[pager.childNodes.length - 1].querySelector('button').type, 'button');
 
   const result = await run(document, api);
+  const log = logOf(document);
 
   assert.equal(result.done, 250);
   assert.equal(result.failed, 0);
-  assert.equal(api.readFileTotal(document), 250);
-  assert.equal(logOf(document)[0], 'page:7');
-  assert.equal(logOf(document).includes('next'), false);
+  assert.equal(api.readFileTotal(document), 0);
+  assert.equal(log[0], 'page:7');
+  assert.equal(log.includes('next'), false);
+  assert.equal(log.includes('prev'), false);
+  assert.equal(log.filter((entry) => entry === 'page:1').length, 6);
   assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '7');
-  assert.equal(document.querySelectorAll('.file-row').length, 0);
+  assert.ok(waited(result) >= 19000);
 });
 
-test('deleteListedFiles does not walk forward when the next arrow is enabled', async () => {
+test('deleteListedFiles stops when a cycle does not reduce the header total', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 3] });
-
-  const result = await run(document, api);
-
-  assert.equal(result.done, 5);
-  assert.equal(document.body.dataset.nextPageClicks, '0');
-  assert.equal(document.body.dataset.ariaNextClicks, '0');
-  assert.equal(logOf(document)[0], 'page:2');
-});
-
-test('deleteListedFiles stops when the previous page does not change the list', async () => {
-  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 3], back: 'stuck' });
+  mountFilesPage(document, 2, { pages: [2, 3], freezeCount: true });
 
   const result = await run(document, api);
 
   assert.equal(result.done, 3);
   assert.equal(result.stopped, false);
-  assert.equal(document.body.dataset.nextPageClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '1');
-  assert.equal(logOf(document)[0], 'page:2');
-  assert.equal(logOf(document).includes('next'), false);
+  assert.equal(document.body.dataset.prevPageClicks, '0');
+  assert.equal(document.body.dataset.nextPageClicks, '0');
+  assert.equal(api.readFileTotal(document), 5);
 });
 
-test('deleteListedFiles reports progress from the last page back to the first', async () => {
+test('deleteListedFiles reports progress from the max page back toward page 1', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 1] });
   const progress = [];

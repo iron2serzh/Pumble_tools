@@ -1,8 +1,11 @@
 export function mountFilesPage(document, count, options = {}) {
   const counts = options.pages ? [...options.pages] : [count];
-  const total = counts.reduce((sum, value) => sum + value, 0);
   let pageIndex = 0;
-  let openedLast = false;
+  let stale = false;
+  let lost = false;
+  let staleLabels = [];
+  let staleCurrent = 1;
+  let visit = 0;
 
   document.body.replaceChildren();
   document.body.dataset.selectAllClicks = '0';
@@ -21,7 +24,6 @@ export function mountFilesPage(document, count, options = {}) {
   const title = document.createElement('div');
   title.className = 'main-view-header__title';
   const titleText = document.createElement('div');
-  titleText.textContent = ` Files (${total})`;
   title.appendChild(titleText);
   header.appendChild(title);
 
@@ -62,9 +64,10 @@ export function mountFilesPage(document, count, options = {}) {
   previousButton.addEventListener('click', () => {
     note('prev');
     bump(document, 'prevPageClicks');
-    if (previousButton.disabled || options.back === 'stuck' || pageIndex <= 0) return;
-    pageIndex -= 1;
-    renderPage();
+    lost = true;
+    stale = false;
+    list.replaceChildren();
+    pages.replaceChildren();
   });
   previous.appendChild(previousButton);
   const next = document.createElement('li');
@@ -73,9 +76,6 @@ export function mountFilesPage(document, count, options = {}) {
   nextButton.addEventListener('click', () => {
     note('next');
     bump(document, 'nextPageClicks');
-    if (nextButton.disabled || pageIndex >= counts.length - 1) return;
-    pageIndex += 1;
-    renderPage();
   });
   next.appendChild(nextButton);
   const decoy = document.createElement('button');
@@ -88,6 +88,7 @@ export function mountFilesPage(document, count, options = {}) {
   browser.append(headerActions, wrapper);
   document.body.append(header, browser);
 
+  updateHeader();
   renderPage();
 
   function note(action) {
@@ -95,46 +96,83 @@ export function mountFilesPage(document, count, options = {}) {
     document.body.dataset.actionLog = current ? `${current},${action}` : action;
   }
 
-  function renderPage() {
-    list.replaceChildren();
-    actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
-    const inRange = pageIndex >= 0 && pageIndex < counts.length;
-    const pageCount = inRange ? (counts[pageIndex] || 0) : 0;
-    for (let index = 0; index < pageCount; index += 1) {
-      list.appendChild(createRow(document, `${pageIndex}-${index}`));
-    }
+  function updateHeader() {
+    if (options.freezeCount) return;
+    const sum = counts.reduce((total, value) => total + value, 0);
+    titleText.textContent = ` Files (${sum})`;
+  }
+
+  function renderLabels(labels, current) {
     pages.replaceChildren(previous);
-    for (let number = 1; number <= counts.length; number += 1) {
+    labels.forEach((number) => {
       const item = document.createElement('li');
       item.textContent = String(number);
-      if (inRange && number === pageIndex + 1) item.setAttribute('aria-current', 'page');
+      if (number === current) item.setAttribute('aria-current', 'page');
       item.addEventListener('click', () => {
         note(`page:${number}`);
         bump(document, 'pageNumberClicks');
-        if (options.back === 'stuck' && openedLast) return;
+        if (lost) return;
+        if (stale) {
+          if (number !== 1) return;
+          stale = false;
+          pageIndex = 0;
+          renderPage();
+          return;
+        }
         if (number < 1 || number > counts.length) return;
         pageIndex = number - 1;
-        openedLast = true;
         renderPage();
       });
       pages.appendChild(item);
-    }
+    });
     pages.appendChild(next);
-    previousButton.disabled = pageIndex <= 0;
-    nextButton.disabled = pageIndex >= counts.length - 1;
+    previousButton.disabled = false;
+    nextButton.disabled = false;
+  }
+
+  function renderPage() {
+    list.replaceChildren();
+    actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
+    if (lost) {
+      pages.replaceChildren();
+      return;
+    }
+    if (stale) {
+      renderLabels(staleLabels, staleCurrent);
+      return;
+    }
+    visit += 1;
+    const pageCount = counts[pageIndex] || 0;
+    for (let index = 0; index < pageCount; index += 1) {
+      const id = options.freezeCount
+        ? `${visit}-${pageIndex}-${index}`
+        : `${pageIndex}-${index}`;
+      list.appendChild(createRow(document, id));
+    }
+    const labels = [];
+    for (let number = 1; number <= counts.length; number += 1) labels.push(number);
+    renderLabels(labels, counts.length === 0 ? 0 : pageIndex + 1);
+    updateHeader();
   }
 
   function shrinkAfterDelete() {
-    if (counts.length > 1 && pageIndex === counts.length - 1) {
-      counts.pop();
-      pageIndex = counts.length;
-      renderPage();
-      return;
+    if (!options.freezeCount) {
+      if (counts.length > 0 && pageIndex === counts.length - 1) counts.pop();
+      else if (pageIndex >= 0 && pageIndex < counts.length) counts[pageIndex] = 0;
+      updateHeader();
     }
-    if (pageIndex >= 0 && pageIndex < counts.length) {
-      counts[pageIndex] = 0;
-      renderPage();
-    }
+    staleLabels = [];
+    const shown = options.freezeCount ? (options.pages || [count]).length : Math.max(counts.length + 1, 1);
+    for (let number = 1; number <= shown; number += 1) staleLabels.push(number);
+    staleCurrent = pageIndex + 1;
+    stale = true;
+    list.replaceChildren();
+    renderLabels(staleLabels, staleCurrent);
+  }
+
+  if (options.freezeCount) {
+    const sum = (options.pages || [count]).reduce((total, value) => total + value, 0);
+    titleText.textContent = ` Files (${sum})`;
   }
 }
 
