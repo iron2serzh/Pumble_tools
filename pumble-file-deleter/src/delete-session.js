@@ -1,8 +1,10 @@
 (function (root) {
   const api = (root.PumbleFileDeleter = root.PumbleFileDeleter || {});
   const SELECT_ALL = '.file-browser .header-actions .header-actions__actions .pmbl-checkbox.header-actions__checkbox input';
+  const SELECT_BOX = '.file-browser .header-actions .header-actions__actions .pmbl-checkbox.header-actions__checkbox';
   const DELETE_BUTTON = '.file-browser .header-actions .header-actions__actions > div:nth-child(5) > button';
   const CONFIRM = 'button.confirmation-modal__confirm-btn:not([data-pumble-tools-used])';
+  const SORT_ROOT = '.file-browser .sort-dropdown.file-browser__sort';
   const PAUSE_MS = 1000;
 
   function elementChildren(node) {
@@ -66,6 +68,41 @@
     if (typeof options.onStep === 'function') options.onStep(label);
   }
 
+  function pointerClick(node) {
+    const view = node.ownerDocument.defaultView;
+    const init = { bubbles: true, cancelable: true, view, button: 0 };
+    const Pointer = view.PointerEvent || view.MouseEvent;
+    node.dispatchEvent(new Pointer('pointerdown', init));
+    node.dispatchEvent(new view.MouseEvent('mousedown', init));
+    node.dispatchEvent(new view.MouseEvent('mouseup', init));
+    node.dispatchEvent(new view.MouseEvent('click', init));
+  }
+
+  function newTrash(doc, preexisting) {
+    const button = doc.querySelector(DELETE_BUTTON);
+    if (!button || button === preexisting) return null;
+    return button;
+  }
+
+  function selectionLabel(doc) {
+    const actions = doc.querySelector('.file-browser .header-actions');
+    return /selected/i.test(actions?.textContent || '');
+  }
+
+  function pageListText(doc) {
+    const parts = paginationParts(doc);
+    if (!parts) return '';
+    return parts.numbers.map((node) => (node.textContent || '').trim()).join(',');
+  }
+
+  function viewSignature(doc) {
+    return `${api.readFileTotal(doc)}|${pageListText(doc)}`;
+  }
+
+  function selectDetail(inputFound, trashAppeared) {
+    return `Input: ${inputFound ? 'tak' : 'nie'}. Kosz: ${trashAppeared ? 'tak' : 'nie'}.`;
+  }
+
   async function pause(options, ms = PAUSE_MS) {
     if (typeof options.onPhase === 'function') options.onPhase('wait');
     const sleep = options.sleep || ((delay) => new Promise((resolve) => setTimeout(resolve, delay)));
@@ -85,19 +122,36 @@
     const rows = [...api.listFileRows(doc)];
     const beforeHeader = api.readFileTotal(doc);
     const selectAll = doc.querySelector(SELECT_ALL);
+    const selectBox = doc.querySelector(SELECT_BOX);
     note(options, 'Zaznaczam');
-    if (!selectAll) return { ok: false, failedStep: 'Zaznaczam', rows, beforeHeader };
+    if (!selectAll && !selectBox) {
+      return { ok: false, failedStep: 'Zaznaczam', detail: selectDetail(false, false), rows, beforeHeader };
+    }
     const preexisting = doc.querySelector(DELETE_BUTTON);
-    if (!selectAll.checked) selectAll.click();
+    if (selectAll) selectAll.click();
     await pause(options, PAUSE_MS);
-    if (!selectAll.checked) return { ok: false, failedStep: 'Zaznaczam', rows, beforeHeader };
+    let trash = newTrash(doc, preexisting);
+    const selected = () => Boolean(trash) || selectionLabel(doc);
+    if (!selected() && selectBox) {
+      pointerClick(selectBox);
+      await pause(options, PAUSE_MS);
+      trash = newTrash(doc, preexisting);
+    }
+    if (!trash) trash = await poll(options, () => newTrash(doc, preexisting));
+    if (!trash) {
+      return {
+        ok: false,
+        failedStep: selected() ? 'Klikam kosz' : 'Zaznaczam',
+        detail: selected() ? undefined : selectDetail(Boolean(selectAll), false),
+        rows,
+        beforeHeader,
+      };
+    }
 
     note(options, 'Klikam kosz');
-    const trash = await poll(options, () => {
-      const button = doc.querySelector(DELETE_BUTTON);
-      if (!button || button === preexisting) return null;
-      return button;
-    });
+    if (!trash) {
+      trash = await poll(options, () => newTrash(doc, preexisting));
+    }
     if (!trash) return { ok: false, failedStep: 'Klikam kosz', rows, beforeHeader };
     trash.click();
     await pause(options, PAUSE_MS);
@@ -119,14 +173,73 @@
     return { ok: true, rows, beforeHeader, confirmed: true };
   }
 
+  async function clickPageNumber(doc, number, options) {
+    const parts = paginationParts(doc);
+    const node = parts?.numbers.find((item) => pageNumber(item) === number);
+    if (!node || node === parts.next || node === parts.previous) return false;
+    clickable(node).click();
+    await pause(options, PAUSE_MS);
+    return true;
+  }
+
   async function switchToPage(doc, number, options) {
     const parts = paginationParts(doc);
     const node = parts?.numbers.find((item) => pageNumber(item) === number);
     if (!node || node === parts.next || node === parts.previous) return false;
     note(options, number === 1 ? 'Strona 1' : `Strona ${number}`);
-    clickable(node).click();
+    return clickPageNumber(doc, number, options);
+  }
+
+  async function pickSort(doc, options, index) {
+    const root = doc.querySelector(SORT_ROOT);
+    const toggle = root?.querySelector(':scope > span');
+    if (!toggle) return false;
+    toggle.click();
+    await pause(options, PAUSE_MS);
+    const items = [...root.querySelectorAll('.dropdown-menu-dialog > div > div')];
+    if (!items[index]) return false;
+    items[index].click();
     await pause(options, PAUSE_MS);
     return true;
+  }
+
+  async function refreshBySort(doc, options, before) {
+    if (!doc.querySelector(SORT_ROOT)) return false;
+    if (!await pickSort(doc, options, 1)) return false;
+    const changed = viewSignature(doc) !== before;
+    await pickSort(doc, options, 0);
+    return changed || viewSignature(doc) !== before;
+  }
+
+  async function refreshByPageHop(doc, options, before, deletedPage) {
+    const parts = paginationParts(doc);
+    if (!parts) return false;
+    const values = parts.numbers.map(pageNumber).filter((value) => value);
+    const other = values.find((value) => value !== 1 && value !== deletedPage) || values.find((value) => value !== 1);
+    if (!other) return false;
+    await clickPageNumber(doc, other, options);
+    await clickPageNumber(doc, 1, options);
+    return viewSignature(doc) !== before;
+  }
+
+  async function refreshByFilter(doc, options, before) {
+    const button = doc.querySelector('.file-browser .file-browser__actions [aria-pressed="true"]');
+    if (!button) return false;
+    button.click();
+    await pause(options, PAUSE_MS);
+    return viewSignature(doc) !== before;
+  }
+
+  async function forceRefresh(doc, options, deletedPage) {
+    const before = viewSignature(doc);
+    note(options, 'Odświeżam');
+    if (doc.querySelector(SORT_ROOT)) {
+      const changed = await refreshBySort(doc, options, before);
+      if (changed) return 'sort';
+    }
+    if (await refreshByPageHop(doc, options, before, deletedPage)) return 'page';
+    if (await refreshByFilter(doc, options, before)) return 'filter';
+    return null;
   }
 
   api.deleteListedFiles = async function deleteListedFiles(doc, options = {}) {
@@ -135,6 +248,8 @@
     let stopped = false;
     let outcome = 'done';
     let failedStep = null;
+    let detail = null;
+    let refresh = null;
     const seen = new Set();
     const initialTotal = api.readFileTotal(doc);
 
@@ -150,6 +265,10 @@
         const numbers = (parts?.numbers || []).map(pageNumber).filter((value) => value != null);
         const max = numbers.length ? Math.max(...numbers) : null;
         const single = numbers.length <= 1;
+        if (single && api.listFileRows(doc).length === 0) {
+          outcome = 'header';
+          break;
+        }
 
         if (!single) {
           const opened = await switchToPage(doc, max, options);
@@ -186,31 +305,29 @@
         if (!deletion.ok) {
           outcome = 'blocked';
           failedStep = deletion.failedStep;
+          detail = deletion.detail || null;
           break;
         }
 
         const removed = () => {
-          const afterHeader = api.readFileTotal(doc);
-          const beforeHeader = deletion.beforeHeader;
-          const headerDropped = beforeHeader != null && afterHeader != null && afterHeader < beforeHeader;
           const gone = deletion.rows.filter((row) => !row.isConnected);
-          return { afterHeader, beforeHeader, headerDropped, gone };
+          const clearedPage = deletion.rows.length > 0 && gone.length === deletion.rows.length;
+          return { gone, clearedPage };
         };
         let effect = removed();
-        if (!effect.headerDropped && effect.gone.length === 0) {
+        if (!effect.clearedPage) {
           note(options, 'Czekam');
           await pause(options, PAUSE_MS);
           throwIfAborted(options);
           effect = removed();
-          if (!effect.headerDropped && effect.gone.length === 0) {
+          if (!effect.clearedPage) {
             outcome = 'unchanged';
             failedStep = 'Czekam';
             break;
           }
         }
         const counted = done;
-        if (effect.headerDropped) done += effect.beforeHeader - effect.afterHeader;
-        else done += effect.gone.length;
+        done += effect.gone.length;
         if (done !== counted && typeof options.onProgress === 'function') {
           options.onProgress({
             done,
@@ -227,17 +344,14 @@
           outcome = 'done';
           break;
         }
-        if (single) {
-          outcome = 'header';
-          break;
-        }
 
-        const back = await switchToPage(doc, 1, options);
-        if (!back) {
+        const method = await forceRefresh(doc, options, page);
+        if (!method) {
           outcome = 'blocked';
-          failedStep = 'Strona 1';
+          failedStep = 'Odświeżam';
           break;
         }
+        refresh = method;
       }
     } catch (error) {
       if (options.signal?.aborted || error?.name === 'AbortError') stopped = true;
@@ -248,6 +362,6 @@
       outcome = done === 0 ? 'blocked' : 'header';
     }
 
-    return { done, failed, total: initialTotal ?? done, stopped, outcome, failedStep };
+    return { done, failed, total: initialTotal ?? done, stopped, outcome, failedStep, detail, refresh };
   };
 })(globalThis);

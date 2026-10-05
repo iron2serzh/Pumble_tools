@@ -138,6 +138,23 @@ test('Stop aborts deletion before the next page', async () => {
   assert.match(panel.querySelector('.pumble-tools-status').textContent, /Zatrzymano/);
 });
 
+test('a missing selection bar names the input and the trash', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  const time = clock();
+  const original = api.deleteListedFiles;
+  api.deleteListedFiles = (doc, options) => original(doc, { ...options, ...time, timeoutMs: 200 });
+  mountFilesPage(document, 2, { noSelectionBar: true });
+  const panel = api.syncPanel(document);
+  panel.querySelector('.pumble-tools-delete').click();
+  panel.querySelector('.pumble-tools-yes').click();
+  await panel.pumbleDeletion;
+  const status = panel.querySelector('.pumble-tools-status').textContent;
+  assert.match(status, /Nie doszło: Zaznaczam/);
+  assert.match(status, /Input: tak/);
+  assert.match(status, /Kosz: nie/);
+  assert.equal(status.startsWith('Gotowe'), false);
+});
+
 test('the delete button stays off when the page lists nothing', () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 0);

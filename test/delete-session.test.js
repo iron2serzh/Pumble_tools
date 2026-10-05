@@ -136,7 +136,7 @@ test('deleteListedFiles aborts during the post-delete wait before the next delet
   assert.deepEqual(logOf(document), ['page:2', 'delete']);
 });
 
-test('deleteListedFiles returns to page 1 after each delete and then opens the new max', async () => {
+test('deleteListedFiles refreshes after each delete and then opens the new max', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 3, 1] });
 
@@ -145,7 +145,8 @@ test('deleteListedFiles returns to page 1 after each delete and then opens the n
 
   assert.equal(result.done, 6);
   assert.equal(result.failed, 0);
-  assert.deepEqual(log, ['page:3', 'delete', 'page:1', 'page:2', 'delete', 'page:1', 'delete']);
+  assert.equal(result.refresh, 'sort');
+  assert.deepEqual(log, ['page:3', 'delete', 'sort', 'sort', 'page:2', 'delete', 'sort', 'sort', 'delete']);
   assert.equal(document.body.dataset.nextPageClicks, '0');
   assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.ariaNextClicks, '0');
@@ -156,7 +157,7 @@ test('deleteListedFiles returns to page 1 after each delete and then opens the n
   assert.ok(result.phases.filter((phase) => phase === 'wait').length >= 7);
 });
 
-test('deleteListedFiles clears seven pages by re-reading the max from page 1', async () => {
+test('deleteListedFiles clears seven pages by refreshing before the next max', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   const pages = [40, 40, 40, 40, 40, 40, 10];
   mountFilesPage(document, 40, { pages });
@@ -174,7 +175,8 @@ test('deleteListedFiles clears seven pages by re-reading the max from page 1', a
   assert.equal(log[0], 'page:7');
   assert.equal(log.includes('next'), false);
   assert.equal(log.includes('prev'), false);
-  assert.equal(log.filter((entry) => entry === 'page:1').length, 6);
+  assert.equal(log.filter((entry) => entry === 'page:1').length, 0);
+  assert.equal(document.body.dataset.sortClicks, '12');
   assert.equal(document.body.dataset.nextPageClicks, '0');
   assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '7');
@@ -202,8 +204,118 @@ test('deleteListedFiles waits until select-all is checked and does not click the
   assert.ok(steps.includes('Klikam kosz'));
   assert.ok(steps.includes('Potwierdzam'));
   assert.ok(steps.includes('Czekam'));
-  assert.ok(steps.includes('Strona 1'));
+  assert.ok(steps.includes('Odświeżam'));
   assert.ok(steps.includes('Strona 2'));
+  assert.equal(steps.includes('Strona 1'), false);
+});
+
+test('deleteListedFiles keeps going when the checkbox stays unchecked but the trash appears', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [121, 40], checkedStaysFalse: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 161);
+  assert.equal(result.outcome, 'done');
+  assert.equal(document.body.dataset.checkedWhenTrash, '0');
+  assert.equal(api.readFileTotal(document), 0);
+});
+
+test('deleteListedFiles clicks the visible checkbox when the input does not open the trash', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 4, { selectOnBox: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 4);
+  assert.equal(result.outcome, 'done');
+  assert.equal(Number(document.body.dataset.boxClicks) > 0, true);
+  assert.equal(Number(document.body.dataset.selectAllClicks) > 0, true);
+  assert.equal(api.readFileTotal(document), 0);
+});
+
+test('deleteListedFiles names Zaznaczam when no selection bar appears', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { noSelectionBar: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 0);
+  assert.equal(result.failedStep, 'Zaznaczam');
+  assert.equal(result.detail, 'Input: tak. Kosz: nie.');
+  assert.equal(api.readFileTotal(document), 2);
+});
+
+test('deleteListedFiles does not count a header flicker as a cleared page', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { pages: [2, 3], partialHeader: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 0);
+  assert.equal(result.outcome, 'unchanged');
+  assert.equal(document.body.dataset.sortClicks, '0');
+  assert.equal(document.body.dataset.selectAllClicks, '1');
+  assert.equal(api.readFileTotal(document), 4);
+  assert.equal(document.querySelectorAll('.file-row').length, 3);
+});
+
+test('deleteListedFiles refreshes with the sort control before reading the next max', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 1, { pages: [40, 40, 40, 40, 1] });
+  const steps = [];
+
+  const result = await run(document, api, {
+    onStep(step) {
+      steps.push(step);
+    },
+  });
+
+  assert.equal(result.done, 161);
+  assert.equal(result.refresh, 'sort');
+  assert.equal(result.outcome, 'done');
+  assert.equal(api.readFileTotal(document), 0);
+  assert.ok(steps.includes('Odświeżam'));
+  assert.equal(steps.includes('Strona 1'), false);
+  assert.equal(document.body.dataset.sortClicks, '8');
+});
+
+test('deleteListedFiles hops to another page when the sort control is missing', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [40, 40, 41], noSort: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 121);
+  assert.equal(result.refresh, 'page');
+  assert.equal(result.outcome, 'done');
+  assert.equal(document.body.dataset.sortClicks, '0');
+  assert.equal(api.readFileTotal(document), 0);
+});
+
+test('deleteListedFiles does not select-all on a stale page 1', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [40, 40, 10], noSort: true, staleHops: false });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 10);
+  assert.equal(result.failedStep, 'Odświeżam');
+  assert.equal(result.refresh, null);
+  assert.equal(document.body.dataset.selectAllClicks, '1');
+  assert.equal(api.readFileTotal(document), 80);
+});
+
+test('deleteListedFiles reapplies the active filter when nothing else reloads the list', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [40, 10], noSort: true, staleHops: false, activeFilter: true });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 50);
+  assert.equal(result.refresh, 'filter');
+  assert.equal(result.outcome, 'done');
+  assert.equal(api.readFileTotal(document), 0);
 });
 
 test('deleteListedFiles names Potwierdzam when the confirm button never appears', async () => {

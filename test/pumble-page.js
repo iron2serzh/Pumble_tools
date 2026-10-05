@@ -19,6 +19,9 @@ export function mountFilesPage(document, count, options = {}) {
   document.body.dataset.decoyConfirmClicks = '0';
   document.body.dataset.filterDecoyClicks = '0';
   document.body.dataset.confirmClicks = '0';
+  document.body.dataset.sortClicks = '0';
+  document.body.dataset.boxClicks = '0';
+  document.body.dataset.filterClicks = '0';
   document.body.dataset.actionLog = '';
 
   const header = document.createElement('div');
@@ -49,11 +52,72 @@ export function mountFilesPage(document, count, options = {}) {
   actions.appendChild(checkbox);
   checkboxInput.addEventListener('click', () => {
     bump(document, 'selectAllClicks');
-    if (!checkboxInput.checked) return;
+    if (options.noSelectionBar || options.selectOnBox) {
+      checkboxInput.checked = false;
+      return;
+    }
+    if (options.checkedStaysFalse) checkboxInput.checked = false;
+    else if (!checkboxInput.checked) return;
     queueMicrotask(() => {
       showDeleteButton(document, actions, options, () => shrinkAfterDelete());
     });
   });
+  checkbox.addEventListener('pointerdown', () => {
+    bump(document, 'boxClicks');
+    if (!options.selectOnBox || options.noSelectionBar) return;
+    queueMicrotask(() => {
+      showDeleteButton(document, actions, options, () => shrinkAfterDelete());
+    });
+  });
+
+  const fileActions = document.createElement('div');
+  fileActions.className = 'file-browser__actions';
+  const controls = document.createElement('span');
+  controls.className = 'file-browser__actions__controls';
+  if (!options.noSort) {
+    const sort = document.createElement('span');
+    sort.className = 'sort-dropdown file-browser__sort';
+    const toggle = document.createElement('span');
+    const menu = document.createElement('div');
+    menu.className = 'dropdown-menu-dialog';
+    menu.hidden = true;
+    const menuList = document.createElement('div');
+    ['Najnowsze', 'Najstarsze'].forEach((label) => {
+      const item = document.createElement('div');
+      item.textContent = label;
+      item.addEventListener('click', () => {
+        note('sort');
+        bump(document, 'sortClicks');
+        menu.hidden = true;
+        if (!stale) return;
+        stale = false;
+        if (pageIndex >= counts.length) pageIndex = 0;
+        renderPage();
+      });
+      menuList.appendChild(item);
+    });
+    menu.appendChild(menuList);
+    toggle.addEventListener('click', () => {
+      menu.hidden = !menu.hidden;
+    });
+    sort.append(toggle, menu);
+    controls.appendChild(sort);
+  }
+  if (options.activeFilter) {
+    const filter = document.createElement('button');
+    filter.type = 'button';
+    filter.setAttribute('aria-pressed', 'true');
+    filter.addEventListener('click', () => {
+      note('filter');
+      bump(document, 'filterClicks');
+      if (!stale) return;
+      stale = false;
+      if (pageIndex >= counts.length) pageIndex = 0;
+      renderPage();
+    });
+    controls.appendChild(filter);
+  }
+  fileActions.appendChild(controls);
 
   const wrapper = document.createElement('div');
   wrapper.className = 'file-browser__wrapper';
@@ -90,7 +154,7 @@ export function mountFilesPage(document, count, options = {}) {
   nav.appendChild(pages);
   pagination.append(decoy, nav);
   wrapper.append(list, pagination);
-  browser.append(headerActions, wrapper);
+  browser.append(fileActions, headerActions, wrapper);
   document.body.append(header, browser);
 
   updateHeader();
@@ -118,9 +182,9 @@ export function mountFilesPage(document, count, options = {}) {
         bump(document, 'pageNumberClicks');
         if (lost) return;
         if (stale) {
-          if (number !== 1) return;
+          if (number === 1 || options.staleHops === false) return;
           stale = false;
-          pageIndex = 0;
+          pageIndex = number <= counts.length ? number - 1 : 0;
           renderPage();
           return;
         }
@@ -199,6 +263,8 @@ function seedFilterDecoy(document, actions) {
 }
 
 function showDeleteButton(document, actions, options, onCleared) {
+  const input = document.querySelector('.header-actions__checkbox input');
+  document.body.dataset.checkedWhenTrash = input?.checked ? '1' : '0';
   actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
   for (let index = 0; index < 3; index += 1) {
     const filler = document.createElement('div');
@@ -221,6 +287,12 @@ function showDeleteButton(document, actions, options, onCleared) {
     document.body.dataset.actionLog = current ? `${current},delete` : 'delete';
     const rows = [...document.querySelectorAll('.file-browser__list > .file-list-view')];
     if (options.confirm === 'absent') return;
+    if (options.partialHeader) {
+      const title = document.querySelector('.main-view-header__title');
+      const current = Number((title?.textContent || '').match(/\((\d+)\)/)?.[1] || 0);
+      if (title) title.textContent = ` Files (${Math.max(0, current - 1)})`;
+      return;
+    }
     if (options.confirm === false) {
       rows.forEach((row) => row.remove());
       onCleared();

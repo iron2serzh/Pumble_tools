@@ -84,7 +84,10 @@
         const summary = `Usunięto ${result.done} z ${result.total}${errors}`;
         if (result.stopped) status.textContent = `Zatrzymano. ${summary}.`;
         else if (liveTotal === 0) status.textContent = `Gotowe. ${summary}.`;
-        else if (result.failedStep) status.textContent = `Nie doszło: ${result.failedStep}. ${summary}.`;
+        else if (result.failedStep) {
+          const detail = result.detail ? ` ${result.detail}` : '';
+          status.textContent = `Nie doszło: ${result.failedStep}.${detail} ${summary}.`;
+        }
         else status.textContent = `Niegotowe. ${summary}. Nagłówek nadal pokazuje ${liveTotal}.`;
         renderCount(panel, doc);
         return result;
