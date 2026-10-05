@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Pumble — usuń pliki",
-  "version": "0.3.0",
-  "description": "Na widoku Files zaznacza stronę, klika kosz i przechodzi strzałką dalej. Potwierdzenie, postęp i Stop.",
+  "version": "0.4.0",
+  "description": "Na widoku Files kasuje od ostatniej strony do pierwszej. Potwierdzenie, postęp i Stop.",
   "content_scripts": [
     {
       "matches": ["https://app.pumble.com/*"],

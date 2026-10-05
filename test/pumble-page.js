@@ -1,7 +1,8 @@
 export function mountFilesPage(document, count, options = {}) {
-  const counts = options.pages || [count];
+  const counts = options.pages ? [...options.pages] : [count];
   const total = counts.reduce((sum, value) => sum + value, 0);
   let pageIndex = 0;
+  let openedLast = false;
 
   document.body.replaceChildren();
   document.body.dataset.selectAllClicks = '0';
@@ -9,8 +10,11 @@ export function mountFilesPage(document, count, options = {}) {
   document.body.dataset.downloadClicks = '0';
   document.body.dataset.rowMenuClicks = '0';
   document.body.dataset.nextPageClicks = '0';
+  document.body.dataset.prevPageClicks = '0';
+  document.body.dataset.pageNumberClicks = '0';
   document.body.dataset.ariaNextClicks = '0';
   document.body.dataset.decoyConfirmClicks = '0';
+  document.body.dataset.actionLog = '';
 
   const header = document.createElement('div');
   header.className = 'main-view-header file-browser-header-wrapper';
@@ -41,7 +45,7 @@ export function mountFilesPage(document, count, options = {}) {
   actions.appendChild(checkbox);
   checkboxInput.addEventListener('click', () => {
     bump(document, 'selectAllClicks');
-    showDeleteButton(document, actions, options);
+    showDeleteButton(document, actions, options, () => shrinkAfterDelete());
   });
 
   const wrapper = document.createElement('div');
@@ -55,15 +59,21 @@ export function mountFilesPage(document, count, options = {}) {
   const previous = document.createElement('li');
   const previousButton = document.createElement('button');
   previousButton.type = 'button';
-  previousButton.disabled = true;
+  previousButton.addEventListener('click', () => {
+    note('prev');
+    bump(document, 'prevPageClicks');
+    if (previousButton.disabled || options.back === 'stuck' || pageIndex <= 0) return;
+    pageIndex -= 1;
+    renderPage();
+  });
   previous.appendChild(previousButton);
   const next = document.createElement('li');
   const nextButton = document.createElement('button');
   nextButton.type = 'button';
   nextButton.addEventListener('click', () => {
+    note('next');
     bump(document, 'nextPageClicks');
-    if (options.next === 'stuck' || nextButton.disabled) return;
-    if (pageIndex >= counts.length - 1) return;
+    if (nextButton.disabled || pageIndex >= counts.length - 1) return;
     pageIndex += 1;
     renderPage();
   });
@@ -80,10 +90,16 @@ export function mountFilesPage(document, count, options = {}) {
 
   renderPage();
 
+  function note(action) {
+    const current = document.body.dataset.actionLog;
+    document.body.dataset.actionLog = current ? `${current},${action}` : action;
+  }
+
   function renderPage() {
     list.replaceChildren();
     actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
-    const pageCount = counts[pageIndex] || 0;
+    const inRange = pageIndex >= 0 && pageIndex < counts.length;
+    const pageCount = inRange ? (counts[pageIndex] || 0) : 0;
     for (let index = 0; index < pageCount; index += 1) {
       list.appendChild(createRow(document, `${pageIndex}-${index}`));
     }
@@ -91,18 +107,38 @@ export function mountFilesPage(document, count, options = {}) {
     for (let number = 1; number <= counts.length; number += 1) {
       const item = document.createElement('li');
       item.textContent = String(number);
-      if (number === pageIndex + 1) item.setAttribute('aria-current', 'page');
-      pages.appendChild(document.createTextNode(''));
+      if (inRange && number === pageIndex + 1) item.setAttribute('aria-current', 'page');
+      item.addEventListener('click', () => {
+        note(`page:${number}`);
+        bump(document, 'pageNumberClicks');
+        if (options.back === 'stuck' && openedLast) return;
+        if (number < 1 || number > counts.length) return;
+        pageIndex = number - 1;
+        openedLast = true;
+        renderPage();
+      });
       pages.appendChild(item);
     }
-    pages.appendChild(document.createTextNode(''));
     pages.appendChild(next);
-    const canGoForward = pageIndex < counts.length - 1 && (options.next === 'reliable' || options.next === 'stuck');
-    nextButton.disabled = !canGoForward;
+    previousButton.disabled = pageIndex <= 0;
+    nextButton.disabled = pageIndex >= counts.length - 1;
+  }
+
+  function shrinkAfterDelete() {
+    if (counts.length > 1 && pageIndex === counts.length - 1) {
+      counts.pop();
+      pageIndex = counts.length;
+      renderPage();
+      return;
+    }
+    if (pageIndex >= 0 && pageIndex < counts.length) {
+      counts[pageIndex] = 0;
+      renderPage();
+    }
   }
 }
 
-function showDeleteButton(document, actions, options) {
+function showDeleteButton(document, actions, options, onCleared) {
   actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
   for (let index = 0; index < 3; index += 1) {
     const filler = document.createElement('div');
@@ -121,12 +157,15 @@ function showDeleteButton(document, actions, options) {
   button.type = 'button';
   button.addEventListener('click', () => {
     bump(document, 'trashClicks');
+    const current = document.body.dataset.actionLog;
+    document.body.dataset.actionLog = current ? `${current},delete` : 'delete';
     const rows = [...document.querySelectorAll('.file-browser__list > .file-list-view')];
     if (options.confirm === false) {
       rows.forEach((row) => row.remove());
+      onCleared();
       return;
     }
-    openConfirm(document, rows);
+    openConfirm(document, rows, onCleared);
   });
   wrap.appendChild(button);
   actions.appendChild(wrap);
@@ -142,7 +181,7 @@ function createRow(document, id) {
   return row;
 }
 
-function openConfirm(document, rows) {
+function openConfirm(document, rows, onCleared) {
   const wrap = document.createElement('div');
   wrap.className = 'modal-dialog__transition-wrapper';
   const footer = document.createElement('div');
@@ -157,6 +196,7 @@ function openConfirm(document, rows) {
   confirm.addEventListener('click', () => {
     rows.forEach((row) => row.remove());
     wrap.remove();
+    onCleared();
   });
   footer.append(decoy, confirm);
   const dialog = document.createElement('div');

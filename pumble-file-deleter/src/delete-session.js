@@ -8,11 +8,21 @@
     return [...node.childNodes].filter((child) => child.nodeType === 1);
   }
 
-  function findForwardArrow(doc) {
+  function paginationParts(doc) {
     const ul = doc.querySelector('.file-browser .file-browser__pagination nav > ul');
     if (!ul) return null;
     const nodes = elementChildren(ul);
-    return nodes.length > 0 ? nodes[nodes.length - 1] : null;
+    if (nodes.length < 3) return null;
+    return {
+      previous: nodes[0],
+      numbers: nodes.slice(1, -1),
+      next: nodes[nodes.length - 1],
+    };
+  }
+
+  function pageNumber(node) {
+    const value = Number((node?.textContent || '').trim());
+    return Number.isFinite(value) && value > 0 ? value : null;
   }
 
   function clickable(node) {
@@ -77,11 +87,61 @@
     if (!cleared) throw new Error('strona nie zniknęła');
   }
 
+  async function openLastPage(doc, options) {
+    const parts = paginationParts(doc);
+    if (!parts || parts.numbers.length === 0) return;
+    const last = parts.numbers[parts.numbers.length - 1];
+    const lastValue = pageNumber(last);
+    if (!lastValue || api.readCurrentPage(doc) === lastValue) return;
+    const before = signatureOf([...api.listFileRows(doc)]);
+    clickable(last).click();
+    await poll(options, () => {
+      if (api.readCurrentPage(doc) === lastValue) return true;
+      const current = [...api.listFileRows(doc)];
+      if (current.length === 0) return false;
+      return signatureOf(current) !== before ? true : false;
+    });
+  }
+
+  async function goToPreviousPage(doc, deletedPage, previousSignature, options) {
+    const parts = paginationParts(doc);
+    if (!parts) return false;
+    const lastNumber = parts.numbers[parts.numbers.length - 1];
+    const lastValue = pageNumber(lastNumber);
+    const exact = parts.numbers.find((node) => pageNumber(node) === deletedPage - 1);
+    let target = null;
+    if (lastNumber && lastValue != null && lastValue < deletedPage) target = lastNumber;
+    else if (parts.previous && !isDisabled(parts.previous)) target = parts.previous;
+    else if (exact) target = exact;
+    if (!target || target === parts.next) return false;
+    clickable(target).click();
+    const changed = await poll(options, () => {
+      const current = [...api.listFileRows(doc)];
+      if (current.length === 0) return false;
+      const nextSignature = signatureOf(current);
+      return nextSignature !== previousSignature ? nextSignature : false;
+    });
+    return Boolean(changed);
+  }
+
   api.deleteListedFiles = async function deleteListedFiles(doc, options = {}) {
     let done = 0;
     let failed = 0;
     let stopped = false;
     const seen = new Set();
+
+    if (options.signal?.aborted) {
+      return { done, failed, total: api.readFileTotal(doc) ?? done, stopped: true };
+    }
+
+    try {
+      await openLastPage(doc, options);
+    } catch (error) {
+      if (options.signal?.aborted || error?.name === 'AbortError') {
+        return { done, failed, total: api.readFileTotal(doc) ?? done, stopped: true };
+      }
+      throw error;
+    }
 
     while (!stopped) {
       if (options.signal?.aborted) {
@@ -116,17 +176,19 @@
         stopped = true;
         break;
       }
+      if (page <= 1) break;
 
-      const arrow = findForwardArrow(doc);
-      if (!arrow || isDisabled(arrow)) break;
-      clickable(arrow).click();
-      const changed = await poll(options, () => {
-        const current = api.listFileRows(doc);
-        if (current.length === 0) return false;
-        const nextSignature = signatureOf(current);
-        return nextSignature !== signature ? nextSignature : false;
-      });
-      if (!changed) break;
+      let moved = false;
+      try {
+        moved = await goToPreviousPage(doc, page, signature, options);
+      } catch (error) {
+        if (options.signal?.aborted || error?.name === 'AbortError') {
+          stopped = true;
+          break;
+        }
+        throw error;
+      }
+      if (!moved) break;
     }
 
     return { done, failed, total: api.readFileTotal(doc) ?? done, stopped };

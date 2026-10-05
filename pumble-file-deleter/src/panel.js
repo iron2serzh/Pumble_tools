@@ -42,7 +42,7 @@
       const confirm = panel.querySelector('.pumble-tools-confirm');
       confirm.hidden = false;
       panel.querySelector('.pumble-tools-confirm-text').textContent =
-        `Usunąć ${root.PumbleFileDeleter.fileCountLabel(count)}? Zaznaczę wszystko i użyję kosza. Potem strzałka na następną stronę.`;
+        `Usunąć ${root.PumbleFileDeleter.fileCountLabel(count)}? Zaznaczę wszystko i użyję kosza. Zaczynam od ostatniej strony i cofam się do pierwszej.`;
     });
     panel.querySelector('.pumble-tools-no').addEventListener('click', () => {
       panel.querySelector('.pumble-tools-confirm').hidden = true;

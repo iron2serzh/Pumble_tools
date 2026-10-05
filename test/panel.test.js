@@ -39,7 +39,7 @@ test('asking to delete shows a confirmation and keeps the files', () => {
   button.click();
   assert.match(panel.textContent, /Usunąć 2 pliki/);
   assert.match(panel.textContent, /Zaznaczę wszystko/);
-  assert.match(panel.textContent, /następn/);
+  assert.match(panel.textContent, /ostatniej/);
   assert.equal(document.querySelectorAll('.file-browser__list > .file-row').length, 2);
 });
 
@@ -70,13 +70,13 @@ test('confirming deletion removes the listed files and shows progress', async ()
 
 test('Stop aborts deletion before the next page', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 2], next: 'reliable' });
+  mountFilesPage(document, 2, { pages: [2, 5] });
   const original = api.deleteListedFiles;
   api.deleteListedFiles = (doc, options) => original(doc, {
     ...options,
     onProgress(snapshot) {
       options.onProgress(snapshot);
-      if (snapshot.page === 1) document.querySelector('.pumble-tools-stop').click();
+      if (snapshot.page === 2) document.querySelector('.pumble-tools-stop').click();
     },
   });
   const panel = api.syncPanel(document);
@@ -87,6 +87,7 @@ test('Stop aborts deletion before the next page', async () => {
   await panel.pumbleDeletion;
   assert.equal(document.body.dataset.nextPageClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '1');
+  assert.equal(document.body.dataset.actionLog, 'page:2,delete');
   assert.match(panel.querySelector('.pumble-tools-status').textContent, /Zatrzymano/);
 });
 
