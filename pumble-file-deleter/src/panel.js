@@ -1,13 +1,23 @@
 (function (root) {
   root.PumbleFileDeleter = root.PumbleFileDeleter || {};
 
+  function listedCount(doc) {
+    const total = root.PumbleFileDeleter.readFileTotal(doc);
+    if (total != null) return total;
+    return root.PumbleFileDeleter.listFileRows(doc).length;
+  }
+
   function renderCount(panel, doc) {
-    const count = root.PumbleFileDeleter.listFileRows(doc).length;
-    const label = `Na tej stronie: ${count}`;
+    const total = root.PumbleFileDeleter.readFileTotal(doc);
+    const page = root.PumbleFileDeleter.readCurrentPage(doc);
+    const rows = root.PumbleFileDeleter.listFileRows(doc).length;
+    const label = total == null
+      ? `Na tej stronie: ${rows}`
+      : `Pliki: ${total} · strona ${page}`;
     const countNode = panel.querySelector('.pumble-tools-count');
     if (countNode.textContent !== label) countNode.textContent = label;
     const button = panel.querySelector('.pumble-tools-delete');
-    if (button) button.disabled = count === 0 || panel.dataset.running === '1';
+    if (button) button.disabled = rows === 0 || listedCount(doc) === 0 || panel.dataset.running === '1';
   }
 
   function ensurePanel(doc) {
@@ -27,12 +37,12 @@
       <p class="pumble-tools-status"></p>
     `;
     panel.querySelector('.pumble-tools-delete').addEventListener('click', () => {
-      const count = root.PumbleFileDeleter.listFileRows(doc).length;
+      const count = listedCount(doc);
       if (count === 0 || panel.dataset.running === '1') return;
       const confirm = panel.querySelector('.pumble-tools-confirm');
       confirm.hidden = false;
       panel.querySelector('.pumble-tools-confirm-text').textContent =
-        `Usunąć ${root.PumbleFileDeleter.fileCountLabel(count)} z tej strony? Zaznaczę wszystko i użyję kosza. Jeśli jest następna strona, powtórzę.`;
+        `Usunąć ${root.PumbleFileDeleter.fileCountLabel(count)}? Zaznaczę wszystko i użyję kosza. Potem strzałka na następną stronę.`;
     });
     panel.querySelector('.pumble-tools-no').addEventListener('click', () => {
       panel.querySelector('.pumble-tools-confirm').hidden = true;

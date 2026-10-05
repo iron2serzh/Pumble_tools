@@ -2,9 +2,9 @@
 
 Rozszerzenie Chrome (Manifest V3) na `https://app.pumble.com/*`. Panel pojawia się tylko na widoku Files.
 
-Na stronie listy (maks. 40 plików) klika **Select all**, potem kosz na pasku „N Selected” i potwierdzenie, jeśli Pumble je pokaże. Nie klika plików po jednym. Nie używa tokena i nie kasuje wiadomości.
+Na każdej stronie klika checkbox **Select all** w `header-actions__checkbox`, potem przycisk w piątym `div` paska `header-actions__actions` (pojawia się dopiero po zaznaczeniu) i `button.confirmation-modal__confirm-btn`, jeśli modal jest. Nie klika plików po jednym. Nie używa tokena i nie kasuje wiadomości.
 
-Następną stronę otwiera tylko wtedy, gdy paginacja ma kontrolkę z nazwą `Next page` albo `Następna strona` i lista naprawdę się zmienia. Inaczej zostaje przy jednej stronie.
+Liczba w panelu pochodzi z nagłówka, tekst w stylu `Files (250)`, plus numer strony z paginacji. Dalej idzie ostatnia strzałka w `file-browser__pagination nav > ul`. Zatrzymuje się, gdy ta strzałka jest wyłączona albo lista się nie zmienia.
 
 ## Instalacja (rozpakowane)
 
