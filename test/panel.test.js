@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadExtension } from './helpers.js';
-import { mountFilesPage } from './pumble-page.js';
+import { clock, mountFilesPage } from './pumble-page.js';
 
 const scripts = ['src/list-files.js', 'src/wait-for.js', 'src/delete-session.js', 'src/panel.js'];
 
@@ -57,6 +57,9 @@ test('cancelling the confirmation keeps every file', () => {
 
 test('confirming deletion removes the listed files and shows progress', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  const time = clock();
+  const original = api.deleteListedFiles;
+  api.deleteListedFiles = (doc, options) => original(doc, { ...options, ...time, timeoutMs: 200 });
   mountFilesPage(document, 2);
   const panel = api.syncPanel(document);
   panel.querySelector('.pumble-tools-delete').click();
@@ -77,7 +80,8 @@ test('the panel shows a moving wait while a pause is in progress', async () => {
     ...options,
     sleep: async () => {
       const bar = document.querySelector('.pumble-tools-wait');
-      if (bar && bar.hidden === false && document.querySelector('.pumble-tools-status').textContent === 'Czekam…') {
+      const step = document.querySelector('.pumble-tools-status').textContent;
+      if (bar && bar.hidden === false && /Zaznaczam|Klikam kosz|Potwierdzam|Czekam|Strona/.test(step)) {
         sawWait = true;
       }
     },
@@ -93,13 +97,16 @@ test('the panel shows a moving wait while a pause is in progress', async () => {
 
 test('a confirm that leaves the files up does not say the run is finished', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  const time = clock();
+  const original = api.deleteListedFiles;
+  api.deleteListedFiles = (doc, options) => original(doc, { ...options, ...time, timeoutMs: 200 });
   mountFilesPage(document, 2, { pages: [121, 40], keepRows: true });
   const panel = api.syncPanel(document);
   panel.querySelector('.pumble-tools-delete').click();
   panel.querySelector('.pumble-tools-yes').click();
   await panel.pumbleDeletion;
   const status = panel.querySelector('.pumble-tools-status').textContent;
-  assert.match(status, /Po potwierdzeniu nic nie ubyło/);
+  assert.match(status, /Nie doszło: Czekam/);
   assert.match(status, /Usunięto 0 z 161/);
   assert.equal(status.startsWith('Gotowe'), false);
   assert.equal(document.querySelectorAll('.file-row').length, 40);
@@ -109,8 +116,11 @@ test('Stop aborts deletion before the next page', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
   mountFilesPage(document, 2, { pages: [2, 5] });
   const original = api.deleteListedFiles;
+  const time = clock();
   api.deleteListedFiles = (doc, options) => original(doc, {
     ...options,
+    ...time,
+    timeoutMs: 200,
     onProgress(snapshot) {
       options.onProgress(snapshot);
       if (snapshot.page === 2) document.querySelector('.pumble-tools-stop').click();

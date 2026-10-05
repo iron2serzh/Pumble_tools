@@ -1,8 +1,8 @@
 (function (root) {
   const api = (root.PumbleFileDeleter = root.PumbleFileDeleter || {});
-  const SELECT_ALL = '.file-browser .header-actions__actions .header-actions__checkbox input';
-  const DELETE_BUTTON = '.file-browser .header-actions__actions > div:nth-child(5) > button';
-  const CONFIRM = '.modal-dialog__footer button.confirmation-modal__confirm-btn:not([data-pumble-tools-used])';
+  const SELECT_ALL = '.file-browser .header-actions .header-actions__actions .pmbl-checkbox.header-actions__checkbox input';
+  const DELETE_BUTTON = '.file-browser .header-actions .header-actions__actions > div:nth-child(5) > button';
+  const CONFIRM = 'button.confirmation-modal__confirm-btn:not([data-pumble-tools-used])';
   const PAUSE_MS = 1000;
 
   function elementChildren(node) {
@@ -62,6 +62,10 @@
     return null;
   }
 
+  function note(options, label) {
+    if (typeof options.onStep === 'function') options.onStep(label);
+  }
+
   async function pause(options, ms = PAUSE_MS) {
     if (typeof options.onPhase === 'function') options.onPhase('wait');
     const sleep = options.sleep || ((delay) => new Promise((resolve) => setTimeout(resolve, delay)));
@@ -79,29 +83,47 @@
 
   async function deleteCurrentPage(doc, options) {
     const rows = [...api.listFileRows(doc)];
+    const beforeHeader = api.readFileTotal(doc);
     const selectAll = doc.querySelector(SELECT_ALL);
-    if (!selectAll) return { ok: false, rows };
-    selectAll.click();
+    note(options, 'Zaznaczam');
+    if (!selectAll) return { ok: false, failedStep: 'Zaznaczam', rows, beforeHeader };
+    const preexisting = doc.querySelector(DELETE_BUTTON);
+    if (!selectAll.checked) selectAll.click();
+    await pause(options, PAUSE_MS);
+    if (!selectAll.checked) return { ok: false, failedStep: 'Zaznaczam', rows, beforeHeader };
 
-    const trash = await poll(options, () => doc.querySelector(DELETE_BUTTON));
-    if (!trash) return { ok: false, rows };
+    note(options, 'Klikam kosz');
+    const trash = await poll(options, () => {
+      const button = doc.querySelector(DELETE_BUTTON);
+      if (!button || button === preexisting) return null;
+      return button;
+    });
+    if (!trash) return { ok: false, failedStep: 'Klikam kosz', rows, beforeHeader };
     trash.click();
+    await pause(options, PAUSE_MS);
 
+    note(options, 'Potwierdzam');
     const confirm = await poll(
       { ...options, timeoutMs: Math.min(options.timeoutMs ?? 4000, 1200) },
       () => doc.querySelector(CONFIRM),
     );
-    if (confirm) {
-      confirm.setAttribute('data-pumble-tools-used', '1');
-      confirm.click();
+    const afterClick = api.readFileTotal(doc);
+    if (!confirm) {
+      if (beforeHeader != null && afterClick != null && afterClick < beforeHeader) {
+        return { ok: true, rows, beforeHeader, confirmed: false };
+      }
+      return { ok: false, failedStep: 'Potwierdzam', rows, beforeHeader };
     }
-    return { ok: true, rows };
+    confirm.setAttribute('data-pumble-tools-used', '1');
+    confirm.click();
+    return { ok: true, rows, beforeHeader, confirmed: true };
   }
 
   async function switchToPage(doc, number, options) {
     const parts = paginationParts(doc);
     const node = parts?.numbers.find((item) => pageNumber(item) === number);
     if (!node || node === parts.next || node === parts.previous) return false;
+    note(options, number === 1 ? 'Strona 1' : `Strona ${number}`);
     clickable(node).click();
     await pause(options, PAUSE_MS);
     return true;
@@ -112,6 +134,7 @@
     let failed = 0;
     let stopped = false;
     let outcome = 'done';
+    let failedStep = null;
     const seen = new Set();
     const initialTotal = api.readFileTotal(doc);
 
@@ -132,28 +155,21 @@
           const opened = await switchToPage(doc, max, options);
           if (!opened) {
             outcome = 'blocked';
+            failedStep = `Strona ${max}`;
             break;
           }
         }
 
         throwIfAborted(options);
-        let rows = [...api.listFileRows(doc)];
-        if (rows.length === 0) {
-          const appeared = await poll(options, () => api.listFileRows(doc).length > 0);
-          if (appeared) rows = [...api.listFileRows(doc)];
-        }
-        if (rows.length === 0) {
-          outcome = done > 0 ? 'header' : 'blocked';
-          break;
-        }
-
+        const rows = [...api.listFileRows(doc)];
         const signature = signatureOf(rows);
-        if (seen.has(signature)) {
+        if (rows.length > 0 && seen.has(signature)) {
           outcome = 'unchanged';
+          failedStep = 'Zaznaczam';
           break;
         }
-        seen.add(signature);
-        const page = api.readCurrentPage(doc);
+        if (rows.length > 0) seen.add(signature);
+        const page = max || api.readCurrentPage(doc);
 
         let deletion;
         try {
@@ -169,42 +185,44 @@
         }
         if (!deletion.ok) {
           outcome = 'blocked';
+          failedStep = deletion.failedStep;
           break;
         }
 
-        let gone = deletion.rows.filter((row) => !row.isConnected);
-        if (gone.length > 0) {
-          done += gone.length;
-          if (typeof options.onProgress === 'function') {
-            options.onProgress({
-              done,
-              failed,
-              total: initialTotal ?? done,
-              stopped: false,
-              page,
-            });
-          }
-        }
-        throwIfAborted(options);
-        await pause(options, PAUSE_MS);
-        throwIfAborted(options);
-        if (gone.length === 0) {
-          gone = deletion.rows.filter((row) => !row.isConnected);
-          if (gone.length === 0) {
+        const removed = () => {
+          const afterHeader = api.readFileTotal(doc);
+          const beforeHeader = deletion.beforeHeader;
+          const headerDropped = beforeHeader != null && afterHeader != null && afterHeader < beforeHeader;
+          const gone = deletion.rows.filter((row) => !row.isConnected);
+          return { afterHeader, beforeHeader, headerDropped, gone };
+        };
+        let effect = removed();
+        if (!effect.headerDropped && effect.gone.length === 0) {
+          note(options, 'Czekam');
+          await pause(options, PAUSE_MS);
+          throwIfAborted(options);
+          effect = removed();
+          if (!effect.headerDropped && effect.gone.length === 0) {
             outcome = 'unchanged';
+            failedStep = 'Czekam';
             break;
           }
-          done += gone.length;
-          if (typeof options.onProgress === 'function') {
-            options.onProgress({
-              done,
-              failed,
-              total: initialTotal ?? done,
-              stopped: false,
-              page,
-            });
-          }
         }
+        const counted = done;
+        if (effect.headerDropped) done += effect.beforeHeader - effect.afterHeader;
+        else done += effect.gone.length;
+        if (done !== counted && typeof options.onProgress === 'function') {
+          options.onProgress({
+            done,
+            failed,
+            total: initialTotal ?? done,
+            stopped: false,
+            page,
+          });
+        }
+        note(options, 'Czekam');
+        await pause(options, PAUSE_MS);
+        throwIfAborted(options);
         if (api.readFileTotal(doc) === 0) {
           outcome = 'done';
           break;
@@ -217,6 +235,7 @@
         const back = await switchToPage(doc, 1, options);
         if (!back) {
           outcome = 'blocked';
+          failedStep = 'Strona 1';
           break;
         }
       }
@@ -229,6 +248,6 @@
       outcome = done === 0 ? 'blocked' : 'header';
     }
 
-    return { done, failed, total: initialTotal ?? done, stopped, outcome };
+    return { done, failed, total: initialTotal ?? done, stopped, outcome, failedStep };
   };
 })(globalThis);

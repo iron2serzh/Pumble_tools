@@ -62,17 +62,14 @@
       const wait = panel.querySelector('.pumble-tools-wait');
       panel.pumbleDeletion = root.PumbleFileDeleter.deleteListedFiles(doc, {
         signal: controller.signal,
+        onStep(step) {
+          status.textContent = step;
+          status.dataset.held = step;
+        },
         onPhase(phase) {
-          if (phase === 'wait') {
-            wait.hidden = false;
-            panel.classList.add('pumble-tools-waiting');
-            if (status.textContent !== 'Czekam…') status.dataset.held = status.textContent;
-            status.textContent = 'Czekam…';
-          } else {
-            wait.hidden = true;
-            panel.classList.remove('pumble-tools-waiting');
-            if (status.textContent === 'Czekam…') status.textContent = status.dataset.held || '';
-          }
+          const waiting = phase === 'wait';
+          wait.hidden = !waiting;
+          panel.classList.toggle('pumble-tools-waiting', waiting);
         },
         onProgress(snapshot) {
           const errors = snapshot.failed ? `, błędy: ${snapshot.failed}` : '';
@@ -86,9 +83,9 @@
         const liveTotal = root.PumbleFileDeleter.readFileTotal(doc);
         const summary = `Usunięto ${result.done} z ${result.total}${errors}`;
         if (result.stopped) status.textContent = `Zatrzymano. ${summary}.`;
-        else if (result.outcome === 'unchanged') status.textContent = `Po potwierdzeniu nic nie ubyło. ${summary}.`;
-        else if (liveTotal > 0) status.textContent = `Niegotowe. ${summary}. Nagłówek nadal pokazuje ${liveTotal}.`;
-        else status.textContent = `Gotowe. ${summary}.`;
+        else if (liveTotal === 0) status.textContent = `Gotowe. ${summary}.`;
+        else if (result.failedStep) status.textContent = `Nie doszło: ${result.failedStep}. ${summary}.`;
+        else status.textContent = `Niegotowe. ${summary}. Nagłówek nadal pokazuje ${liveTotal}.`;
         renderCount(panel, doc);
         return result;
       });

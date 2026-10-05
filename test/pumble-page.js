@@ -17,6 +17,8 @@ export function mountFilesPage(document, count, options = {}) {
   document.body.dataset.pageNumberClicks = '0';
   document.body.dataset.ariaNextClicks = '0';
   document.body.dataset.decoyConfirmClicks = '0';
+  document.body.dataset.filterDecoyClicks = '0';
+  document.body.dataset.confirmClicks = '0';
   document.body.dataset.actionLog = '';
 
   const header = document.createElement('div');
@@ -47,7 +49,10 @@ export function mountFilesPage(document, count, options = {}) {
   actions.appendChild(checkbox);
   checkboxInput.addEventListener('click', () => {
     bump(document, 'selectAllClicks');
-    showDeleteButton(document, actions, options, () => shrinkAfterDelete());
+    if (!checkboxInput.checked) return;
+    queueMicrotask(() => {
+      showDeleteButton(document, actions, options, () => shrinkAfterDelete());
+    });
   });
 
   const wrapper = document.createElement('div');
@@ -132,7 +137,8 @@ export function mountFilesPage(document, count, options = {}) {
 
   function renderPage() {
     list.replaceChildren();
-    actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
+    checkboxInput.checked = false;
+    seedFilterDecoy(document, actions);
     if (lost) {
       pages.replaceChildren();
       return;
@@ -176,6 +182,22 @@ export function mountFilesPage(document, count, options = {}) {
   }
 }
 
+function seedFilterDecoy(document, actions) {
+  actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
+  for (let index = 0; index < 3; index += 1) {
+    const filler = document.createElement('div');
+    actions.appendChild(filler);
+  }
+  const wrap = document.createElement('div');
+  wrap.dataset.role = 'filter-decoy';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.action = 'filter-decoy';
+  button.addEventListener('click', () => bump(document, 'filterDecoyClicks'));
+  wrap.appendChild(button);
+  actions.appendChild(wrap);
+}
+
 function showDeleteButton(document, actions, options, onCleared) {
   actions.querySelectorAll(':scope > div:not(.header-actions__checkbox)').forEach((node) => node.remove());
   for (let index = 0; index < 3; index += 1) {
@@ -198,7 +220,7 @@ function showDeleteButton(document, actions, options, onCleared) {
     const current = document.body.dataset.actionLog;
     document.body.dataset.actionLog = current ? `${current},delete` : 'delete';
     const rows = [...document.querySelectorAll('.file-browser__list > .file-list-view')];
-    if (options.keepRows) return;
+    if (options.confirm === 'absent') return;
     if (options.confirm === false) {
       rows.forEach((row) => row.remove());
       onCleared();
@@ -233,6 +255,7 @@ function openConfirm(document, rows, onCleared, options = {}) {
   confirm.type = 'button';
   confirm.className = 'MuiButton-containedPrimary css-dr4g1b confirmation-modal__confirm-btn';
   confirm.addEventListener('click', () => {
+    bump(document, 'confirmClicks');
     wrap.remove();
     if (options.keepRows) return;
     rows.forEach((row) => row.remove());

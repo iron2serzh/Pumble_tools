@@ -125,7 +125,7 @@ test('deleteListedFiles aborts during the post-delete wait before the next delet
   const result = await run(document, api, {
     signal: controller.signal,
     sleep: async () => {
-      if (document.body.dataset.trashClicks === '1') controller.abort();
+      if (document.body.dataset.confirmClicks === '1') controller.abort();
     },
   });
 
@@ -179,6 +179,42 @@ test('deleteListedFiles clears seven pages by re-reading the max from page 1', a
   assert.equal(document.body.dataset.prevPageClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '7');
   assert.ok(waited(result) >= 19000);
+});
+
+test('deleteListedFiles waits until select-all is checked and does not click the filter bar', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [121, 40] });
+  const steps = [];
+
+  const result = await run(document, api, {
+    onStep(step) {
+      steps.push(step);
+    },
+  });
+
+  assert.equal(result.done, 161);
+  assert.equal(result.outcome, 'done');
+  assert.equal(document.body.dataset.filterDecoyClicks, '0');
+  assert.equal(document.body.dataset.trashClicks, '2');
+  assert.equal(document.body.dataset.confirmClicks, '2');
+  assert.equal(api.readFileTotal(document), 0);
+  assert.ok(steps.includes('Zaznaczam'));
+  assert.ok(steps.includes('Klikam kosz'));
+  assert.ok(steps.includes('Potwierdzam'));
+  assert.ok(steps.includes('Czekam'));
+  assert.ok(steps.includes('Strona 1'));
+  assert.ok(steps.includes('Strona 2'));
+});
+
+test('deleteListedFiles names Potwierdzam when the confirm button never appears', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 2, { keepRows: true, confirm: 'absent' });
+
+  const result = await run(document, api);
+
+  assert.equal(result.done, 0);
+  assert.equal(result.failedStep, 'Potwierdzam');
+  assert.equal(api.readFileTotal(document), 2);
 });
 
 test('deleteListedFiles still deletes every page when the pager does not mark the current one', async () => {
