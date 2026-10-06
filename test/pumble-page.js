@@ -6,6 +6,8 @@ export function mountFilesPage(document, count, options = {}) {
   let staleLabels = [];
   let staleCurrent = 1;
   let visit = 0;
+  let onGhost = false;
+  const ghosts = new Set(options.ghostPages || []);
 
   document.body.replaceChildren();
   document.body.dataset.selectAllClicks = '0';
@@ -22,6 +24,7 @@ export function mountFilesPage(document, count, options = {}) {
   document.body.dataset.sortClicks = '0';
   document.body.dataset.boxClicks = '0';
   document.body.dataset.filterClicks = '0';
+  document.body.dataset.headerClicks = '0';
   document.body.dataset.actionLog = '';
 
   const header = document.createElement('div');
@@ -30,6 +33,16 @@ export function mountFilesPage(document, count, options = {}) {
   title.className = 'main-view-header__title';
   const titleText = document.createElement('div');
   title.appendChild(titleText);
+  title.addEventListener('click', () => {
+    note('header');
+    bump(document, 'headerClicks');
+    if (!onGhost && !stale) return;
+    if (options.headerReloads === false && !onGhost) return;
+    onGhost = false;
+    stale = false;
+    if (pageIndex >= counts.length) pageIndex = 0;
+    renderPage();
+  });
   header.appendChild(title);
 
   const browser = document.createElement('div');
@@ -52,6 +65,10 @@ export function mountFilesPage(document, count, options = {}) {
   actions.appendChild(checkbox);
   checkboxInput.addEventListener('click', () => {
     bump(document, 'selectAllClicks');
+    if (onGhost) {
+      checkboxInput.checked = false;
+      return;
+    }
     if (options.noSelectionBar || options.selectOnBox) {
       checkboxInput.checked = false;
       return;
@@ -89,7 +106,8 @@ export function mountFilesPage(document, count, options = {}) {
         note('sort');
         bump(document, 'sortClicks');
         menu.hidden = true;
-        if (!stale) return;
+        if (!stale && !onGhost) return;
+        onGhost = false;
         stale = false;
         if (pageIndex >= counts.length) pageIndex = 0;
         renderPage();
@@ -181,6 +199,10 @@ export function mountFilesPage(document, count, options = {}) {
         note(`page:${number}`);
         bump(document, 'pageNumberClicks');
         if (lost) return;
+        if (ghosts.has(number)) {
+          enterGhost();
+          return;
+        }
         if (stale) {
           if (number === 1 || options.staleHops === false) return;
           stale = false;
@@ -199,7 +221,24 @@ export function mountFilesPage(document, count, options = {}) {
     nextButton.disabled = false;
   }
 
+  function visibleLabels() {
+    const labels = [];
+    for (let number = 1; number <= counts.length; number += 1) labels.push(number);
+    ghosts.forEach((number) => {
+      if (!labels.includes(number)) labels.push(number);
+    });
+    labels.sort((left, right) => left - right);
+    return labels;
+  }
+
+  function enterGhost() {
+    onGhost = true;
+    list.replaceChildren();
+    if (pagination.isConnected) pagination.remove();
+  }
+
   function renderPage() {
+    if (!pagination.isConnected) wrapper.appendChild(pagination);
     list.replaceChildren();
     checkboxInput.checked = false;
     seedFilterDecoy(document, actions);
@@ -219,14 +258,13 @@ export function mountFilesPage(document, count, options = {}) {
         : `${pageIndex}-${index}`;
       list.appendChild(createRow(document, id));
     }
-    const labels = [];
-    for (let number = 1; number <= counts.length; number += 1) labels.push(number);
-    renderLabels(labels, counts.length === 0 ? 0 : pageIndex + 1);
+    renderLabels(visibleLabels(), counts.length === 0 ? 0 : pageIndex + 1);
     updateHeader();
   }
 
   function shrinkAfterDelete() {
     if (!options.freezeCount) {
+      if (options.lingerCleared) ghosts.add(pageIndex + 1);
       if (counts.length > 0 && pageIndex === counts.length - 1) counts.pop();
       else if (pageIndex >= 0 && pageIndex < counts.length) counts[pageIndex] = 0;
       updateHeader();
@@ -244,6 +282,7 @@ export function mountFilesPage(document, count, options = {}) {
     const sum = (options.pages || [count]).reduce((total, value) => total + value, 0);
     titleText.textContent = ` Files (${sum})`;
   }
+  if (options.startGhost) enterGhost();
 }
 
 function seedFilterDecoy(document, actions) {

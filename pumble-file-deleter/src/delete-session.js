@@ -5,7 +5,23 @@
   const DELETE_BUTTON = '.file-browser .header-actions .header-actions__actions > div:nth-child(5) > button';
   const CONFIRM = 'button.confirmation-modal__confirm-btn:not([data-pumble-tools-used])';
   const SORT_ROOT = '.file-browser .sort-dropdown.file-browser__sort';
+  const FILES_HEADER = '.main-view-header.file-browser-header-wrapper .main-view-header__title';
+  const PAGE_SIZE = 40;
   const PAUSE_MS = 1000;
+
+  function realLastPage(total) {
+    if (total == null) return null;
+    if (total <= 0) return 0;
+    return Math.ceil(total / PAGE_SIZE);
+  }
+
+  function paginationMounted(doc) {
+    return Boolean(doc.querySelector('.file-browser .file-browser__pagination'));
+  }
+
+  function isEmptyGhost(doc) {
+    return api.listFileRows(doc).length === 0 && Boolean(doc.querySelector(SELECT_ALL)) && !paginationMounted(doc);
+  }
 
   function elementChildren(node) {
     return [...node.childNodes].filter((child) => child.nodeType === 1);
@@ -211,11 +227,12 @@
     return changed || viewSignature(doc) !== before;
   }
 
-  async function refreshByPageHop(doc, options, before, deletedPage) {
+  async function refreshByPageHop(doc, options, before, deletedPage, allowed) {
     const parts = paginationParts(doc);
     if (!parts) return false;
     const values = parts.numbers.map(pageNumber).filter((value) => value);
-    const other = values.find((value) => value !== 1 && value !== deletedPage) || values.find((value) => value !== 1);
+    const usable = (value) => value !== deletedPage && (!allowed || allowed(value));
+    const other = values.find((value) => value !== 1 && usable(value)) || values.find((value) => value !== 1 && usable(value));
     if (!other) return false;
     await clickPageNumber(doc, other, options);
     await clickPageNumber(doc, 1, options);
@@ -230,15 +247,37 @@
     return viewSignature(doc) !== before;
   }
 
-  async function forceRefresh(doc, options, deletedPage) {
+  async function forceRefresh(doc, options, deletedPage, allowed) {
     const before = viewSignature(doc);
     note(options, 'Odświeżam');
     if (doc.querySelector(SORT_ROOT)) {
       const changed = await refreshBySort(doc, options, before);
       if (changed) return 'sort';
     }
-    if (await refreshByPageHop(doc, options, before, deletedPage)) return 'page';
+    if (await refreshByPageHop(doc, options, before, deletedPage, allowed)) return 'page';
     if (await refreshByFilter(doc, options, before)) return 'filter';
+    const header = doc.querySelector(FILES_HEADER);
+    if (header) {
+      clickable(header).click();
+      await pause(options, PAUSE_MS);
+      if (viewSignature(doc) !== before) return 'header';
+    }
+    return null;
+  }
+
+  async function recoverFromGhost(doc, options) {
+    note(options, 'Pusta strona');
+    const before = viewSignature(doc);
+    if (doc.querySelector(SORT_ROOT)) {
+      await refreshBySort(doc, options, before);
+      if (paginationMounted(doc) && api.listFileRows(doc).length > 0) return 'sort';
+    }
+    const header = doc.querySelector(FILES_HEADER);
+    if (header) {
+      clickable(header).click();
+      await pause(options, PAUSE_MS);
+      if (paginationMounted(doc) && api.listFileRows(doc).length > 0) return 'header';
+    }
     return null;
   }
 
@@ -251,7 +290,13 @@
     let detail = null;
     let refresh = null;
     const seen = new Set();
+    const cleared = new Set();
     const initialTotal = api.readFileTotal(doc);
+    const allowedPage = (value) => {
+      const last = realLastPage(api.readFileTotal(doc));
+      if (last == null) return !cleared.has(value);
+      return value <= last && !cleared.has(value);
+    };
 
     try {
       while (!stopped) {
@@ -260,22 +305,44 @@
           outcome = 'done';
           break;
         }
+        if (isEmptyGhost(doc)) {
+          const method = await recoverFromGhost(doc, options);
+          if (!method) {
+            outcome = 'blocked';
+            failedStep = 'Pusta strona';
+            break;
+          }
+          refresh = method;
+          continue;
+        }
 
         const parts = paginationParts(doc);
         const numbers = (parts?.numbers || []).map(pageNumber).filter((value) => value != null);
-        const max = numbers.length ? Math.max(...numbers) : null;
-        const single = numbers.length <= 1;
-        if (single && api.listFileRows(doc).length === 0) {
+        const candidates = numbers.filter(allowedPage);
+        const target = candidates.length ? Math.max(...candidates) : null;
+        if (api.listFileRows(doc).length === 0 && candidates.length === 0) {
           outcome = 'header';
           break;
         }
 
-        if (!single) {
-          const opened = await switchToPage(doc, max, options);
+        const mustOpen = target != null && (candidates.length > 1 || numbers.some((value) => value !== target));
+        if (mustOpen) {
+          const opened = await switchToPage(doc, target, options);
           if (!opened) {
             outcome = 'blocked';
-            failedStep = `Strona ${max}`;
+            failedStep = `Strona ${target}`;
             break;
+          }
+          if (isEmptyGhost(doc)) {
+            cleared.add(target);
+            const method = await recoverFromGhost(doc, options);
+            if (!method) {
+              outcome = 'blocked';
+              failedStep = 'Pusta strona';
+              break;
+            }
+            refresh = method;
+            continue;
           }
         }
 
@@ -288,7 +355,7 @@
           break;
         }
         if (rows.length > 0) seen.add(signature);
-        const page = max || api.readCurrentPage(doc);
+        const page = target || api.readCurrentPage(doc);
 
         let deletion;
         try {
@@ -303,6 +370,18 @@
           break;
         }
         if (!deletion.ok) {
+          const ghost = deletion.rows.length === 0 && deletion.failedStep === 'Zaznaczam';
+          if (ghost) {
+            if (page) cleared.add(page);
+            const method = await recoverFromGhost(doc, options);
+            if (!method && api.listFileRows(doc).length === 0) {
+              outcome = 'blocked';
+              failedStep = 'Pusta strona';
+              break;
+            }
+            refresh = method || refresh;
+            continue;
+          }
           outcome = 'blocked';
           failedStep = deletion.failedStep;
           detail = deletion.detail || null;
@@ -326,6 +405,7 @@
             break;
           }
         }
+        cleared.add(page);
         const counted = done;
         done += effect.gone.length;
         if (done !== counted && typeof options.onProgress === 'function') {
@@ -345,7 +425,7 @@
           break;
         }
 
-        const method = await forceRefresh(doc, options, page);
+        const method = await forceRefresh(doc, options, page, allowedPage);
         if (!method) {
           outcome = 'blocked';
           failedStep = 'Odświeżam';

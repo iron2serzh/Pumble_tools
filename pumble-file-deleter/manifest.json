@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Pumble — usuń pliki",
-  "version": "0.8.0",
-  "description": "Na widoku Files kasuje ostatnią stronę, odświeża sortowaniem i czyta paginację od nowa. Gotowe dopiero przy nagłówku 0.",
+  "version": "0.9.0",
+  "description": "Na widoku Files kasuje ostatnią realną stronę (ceil z nagłówka / 40) i pomija puste numery w pagerze. Gotowe dopiero przy nagłówku 0.",
   "content_scripts": [
     {
       "matches": ["https://app.pumble.com/*"],

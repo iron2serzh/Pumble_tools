@@ -80,7 +80,7 @@ test('deleteListedFiles confirms with confirmation-modal__confirm-btn', async ()
 
 test('deleteListedFiles stops before the next delete when aborted', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 5] });
+  mountFilesPage(document, 2, { pages: [40, 5] });
   const controller = new AbortController();
 
   const result = await run(document, api, {
@@ -100,7 +100,7 @@ test('deleteListedFiles stops before the next delete when aborted', async () => 
 
 test('deleteListedFiles aborts during a page-switch pause before any delete', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 5] });
+  mountFilesPage(document, 2, { pages: [40, 5] });
   const controller = new AbortController();
 
   const result = await run(document, api, {
@@ -119,7 +119,7 @@ test('deleteListedFiles aborts during a page-switch pause before any delete', as
 
 test('deleteListedFiles aborts during the post-delete wait before the next delete', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 5] });
+  mountFilesPage(document, 2, { pages: [40, 5] });
   const controller = new AbortController();
 
   const result = await run(document, api, {
@@ -138,12 +138,12 @@ test('deleteListedFiles aborts during the post-delete wait before the next delet
 
 test('deleteListedFiles refreshes after each delete and then opens the new max', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 3, 1] });
+  mountFilesPage(document, 2, { pages: [40, 40, 1] });
 
   const result = await run(document, api);
   const log = logOf(document);
 
-  assert.equal(result.done, 6);
+  assert.equal(result.done, 81);
   assert.equal(result.failed, 0);
   assert.equal(result.refresh, 'sort');
   assert.deepEqual(log, ['page:3', 'delete', 'sort', 'sort', 'page:2', 'delete', 'sort', 'sort', 'delete']);
@@ -248,7 +248,7 @@ test('deleteListedFiles names Zaznaczam when no selection bar appears', async ()
 
 test('deleteListedFiles does not count a header flicker as a cleared page', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 3], partialHeader: true });
+  mountFilesPage(document, 2, { pages: [40, 3], partialHeader: true });
 
   const result = await run(document, api);
 
@@ -256,7 +256,7 @@ test('deleteListedFiles does not count a header flicker as a cleared page', asyn
   assert.equal(result.outcome, 'unchanged');
   assert.equal(document.body.dataset.sortClicks, '0');
   assert.equal(document.body.dataset.selectAllClicks, '1');
-  assert.equal(api.readFileTotal(document), 4);
+  assert.equal(api.readFileTotal(document), 42);
   assert.equal(document.querySelectorAll('.file-row').length, 3);
 });
 
@@ -285,17 +285,18 @@ test('deleteListedFiles hops to another page when the sort control is missing', 
   mountFilesPage(document, 40, { pages: [40, 40, 41], noSort: true });
 
   const result = await run(document, api);
+  const log = logOf(document);
 
   assert.equal(result.done, 121);
-  assert.equal(result.refresh, 'page');
   assert.equal(result.outcome, 'done');
   assert.equal(document.body.dataset.sortClicks, '0');
+  assert.equal(log.includes('page:2'), true);
   assert.equal(api.readFileTotal(document), 0);
 });
 
 test('deleteListedFiles does not select-all on a stale page 1', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 40, { pages: [40, 40, 10], noSort: true, staleHops: false });
+  mountFilesPage(document, 40, { pages: [40, 40, 10], noSort: true, staleHops: false, headerReloads: false });
 
   const result = await run(document, api);
 
@@ -360,7 +361,7 @@ test('deleteListedFiles keeps deleting when the header total is slow to change',
 
 test('deleteListedFiles stops only after a confirm click leaves the files in place', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 3], keepRows: true });
+  mountFilesPage(document, 2, { pages: [40, 3], keepRows: true });
 
   const result = await run(document, api);
 
@@ -369,13 +370,13 @@ test('deleteListedFiles stops only after a confirm click leaves the files in pla
   assert.equal(result.stopped, false);
   assert.equal(document.body.dataset.selectAllClicks, '1');
   assert.equal(document.body.dataset.trashClicks, '1');
-  assert.equal(api.readFileTotal(document), 5);
+  assert.equal(api.readFileTotal(document), 43);
   assert.equal(document.querySelectorAll('.file-row').length, 3);
 });
 
 test('deleteListedFiles reports progress from the max page back toward page 1', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 1] });
+  mountFilesPage(document, 2, { pages: [40, 1] });
   const progress = [];
 
   await run(document, api, {
@@ -385,7 +386,41 @@ test('deleteListedFiles reports progress from the max page back toward page 1', 
   });
 
   assert.deepEqual(progress, [
-    { done: 1, failed: 0, total: 3, stopped: false, page: 2 },
-    { done: 3, failed: 0, total: 3, stopped: false, page: 1 },
+    { done: 1, failed: 0, total: 41, stopped: false, page: 2 },
+    { done: 41, failed: 0, total: 41, stopped: false, page: 1 },
   ]);
+});
+
+test('deleteListedFiles skips pager numbers above ceil(header / 40) and does not reopen a cleared page', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [40, 40, 40, 39], ghostPages: [5], lingerCleared: true });
+
+  const result = await run(document, api);
+  const log = logOf(document);
+
+  assert.equal(result.done, 159);
+  assert.equal(result.outcome, 'done');
+  assert.equal(result.failedStep, null);
+  assert.equal(api.readFileTotal(document), 0);
+  assert.equal(log.filter((entry) => entry === 'page:5').length, 0);
+  assert.equal(log.filter((entry) => entry === 'page:4').length, 1);
+  assert.equal(document.body.dataset.selectAllClicks, '4');
+});
+
+test('deleteListedFiles recovers from an empty ghost page and keeps deleting', async () => {
+  const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
+  mountFilesPage(document, 40, { pages: [40, 40, 39], startGhost: true });
+  const steps = [];
+
+  const result = await run(document, api, {
+    onStep(step) {
+      steps.push(step);
+    },
+  });
+
+  assert.equal(result.done, 119);
+  assert.equal(result.outcome, 'done');
+  assert.equal(result.failedStep, null);
+  assert.equal(api.readFileTotal(document), 0);
+  assert.ok(steps.includes('Pusta strona'));
 });

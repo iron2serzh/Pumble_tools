@@ -114,7 +114,7 @@ test('a confirm that leaves the files up does not say the run is finished', asyn
 
 test('Stop aborts deletion before the next page', async () => {
   const { document, api } = loadExtension('<!doctype html><body></body>', scripts);
-  mountFilesPage(document, 2, { pages: [2, 5] });
+  mountFilesPage(document, 2, { pages: [40, 5] });
   const original = api.deleteListedFiles;
   const time = clock();
   api.deleteListedFiles = (doc, options) => original(doc, {
